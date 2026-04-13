@@ -41,6 +41,7 @@ type OpenAIAccountScheduleDecision struct {
 	LoadSkew            float64
 	SelectedAccountID   int64
 	SelectedAccountType string
+	SchedulerMode       string
 }
 
 type OpenAIAccountSchedulerMetricsSnapshot struct {
@@ -226,7 +227,9 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	ctx context.Context,
 	req OpenAIAccountScheduleRequest,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
-	decision := OpenAIAccountScheduleDecision{}
+	decision := OpenAIAccountScheduleDecision{
+		SchedulerMode: s.service.openAIWSSchedulerMode(ctx),
+	}
 	start := time.Now()
 	defer func() {
 		decision.LatencyMs = time.Since(start).Milliseconds()
@@ -274,7 +277,17 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		return selection, decision, nil
 	}
 
-	selection, candidateCount, topK, loadSkew, err := s.selectByLoadBalance(ctx, req)
+	var (
+		candidateCount int
+		topK           int
+		loadSkew       float64
+	)
+	switch decision.SchedulerMode {
+	case "strict_priority_fallback":
+		selection, candidateCount, topK, loadSkew, err = s.selectByStrictPriorityFallback(ctx, req)
+	default:
+		selection, candidateCount, topK, loadSkew, err = s.selectByLoadBalance(ctx, req)
+	}
 	decision.Layer = openAIAccountScheduleLayerLoadBalance
 	decision.CandidateCount = candidateCount
 	decision.TopK = topK
@@ -564,16 +577,32 @@ func buildOpenAIWeightedSelectionOrder(
 	return order
 }
 
-func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
+func buildOpenAIStrictPrioritySelectionOrder(candidates []openAIAccountCandidateScore) []openAIAccountCandidateScore {
+	if len(candidates) <= 1 {
+		return append([]openAIAccountCandidateScore(nil), candidates...)
+	}
+
+	order := append([]openAIAccountCandidateScore(nil), candidates...)
+	sort.SliceStable(order, func(i, j int) bool {
+		left, right := order[i], order[j]
+		if left.account.Priority != right.account.Priority {
+			return left.account.Priority < right.account.Priority
+		}
+		return isOpenAIAccountCandidateBetter(left, right)
+	})
+	return order
+}
+
+func (s *defaultOpenAIAccountScheduler) buildOpenAICandidateScores(
 	ctx context.Context,
 	req OpenAIAccountScheduleRequest,
-) (*AccountSelectionResult, int, int, float64, error) {
+) ([]openAIAccountCandidateScore, float64, error) {
 	accounts, err := s.service.listSchedulableAccounts(ctx, req.GroupID)
 	if err != nil {
-		return nil, 0, 0, 0, err
+		return nil, 0, err
 	}
 	if len(accounts) == 0 {
-		return nil, 0, 0, 0, errors.New("no available OpenAI accounts")
+		return nil, 0, errors.New("no available OpenAI accounts")
 	}
 
 	// require_privacy_set: 获取分组信息
@@ -613,7 +642,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		})
 	}
 	if len(filtered) == 0 {
-		return nil, 0, 0, 0, errors.New("no available OpenAI accounts")
+		return nil, 0, errors.New("no available OpenAI accounts")
 	}
 
 	loadMap := map[int64]*AccountLoadInfo{}
@@ -693,6 +722,18 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 			weights.TTFT*ttftFactor
 	}
 
+	return candidates, loadSkew, nil
+}
+
+func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
+	ctx context.Context,
+	req OpenAIAccountScheduleRequest,
+) (*AccountSelectionResult, int, int, float64, error) {
+	candidates, loadSkew, err := s.buildOpenAICandidateScores(ctx, req)
+	if err != nil {
+		return nil, 0, 0, 0, err
+	}
+
 	topK := s.service.openAIWSLBTopK()
 	if topK > len(candidates) {
 		topK = len(candidates)
@@ -748,6 +789,66 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 	}
 
 	return nil, len(candidates), topK, loadSkew, ErrNoAvailableAccounts
+}
+
+func (s *defaultOpenAIAccountScheduler) selectByStrictPriorityFallback(
+	ctx context.Context,
+	req OpenAIAccountScheduleRequest,
+) (*AccountSelectionResult, int, int, float64, error) {
+	candidates, loadSkew, err := s.buildOpenAICandidateScores(ctx, req)
+	if err != nil {
+		return nil, 0, 0, 0, err
+	}
+
+	selectionOrder := buildOpenAIStrictPrioritySelectionOrder(candidates)
+	for i := 0; i < len(selectionOrder); i++ {
+		candidate := selectionOrder[i]
+		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.RequestedModel)
+		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
+			continue
+		}
+		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.RequestedModel)
+		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
+			continue
+		}
+		result, acquireErr := s.service.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
+		if acquireErr != nil {
+			return nil, len(candidates), 1, loadSkew, acquireErr
+		}
+		if result != nil && result.Acquired {
+			if req.SessionHash != "" {
+				_ = s.service.BindStickySession(ctx, req.GroupID, req.SessionHash, fresh.ID)
+			}
+			return &AccountSelectionResult{
+				Account:     fresh,
+				Acquired:    true,
+				ReleaseFunc: result.ReleaseFunc,
+			}, len(candidates), 1, loadSkew, nil
+		}
+	}
+
+	cfg := s.service.schedulingConfig()
+	for _, candidate := range selectionOrder {
+		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.RequestedModel)
+		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
+			continue
+		}
+		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.RequestedModel)
+		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
+			continue
+		}
+		return &AccountSelectionResult{
+			Account: fresh,
+			WaitPlan: &AccountWaitPlan{
+				AccountID:      fresh.ID,
+				MaxConcurrency: fresh.Concurrency,
+				Timeout:        cfg.FallbackWaitTimeout,
+				MaxWaiting:     cfg.FallbackMaxWaiting,
+			},
+		}, len(candidates), 1, loadSkew, nil
+	}
+
+	return nil, len(candidates), 1, loadSkew, ErrNoAvailableAccounts
 }
 
 func (s *defaultOpenAIAccountScheduler) isAccountTransportCompatible(account *Account, requiredTransport OpenAIUpstreamTransport) bool {
@@ -829,7 +930,9 @@ func (s *OpenAIGatewayService) SelectAccountWithScheduler(
 	excludedIDs map[int64]struct{},
 	requiredTransport OpenAIUpstreamTransport,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
-	decision := OpenAIAccountScheduleDecision{}
+	decision := OpenAIAccountScheduleDecision{
+		SchedulerMode: s.openAIWSSchedulerMode(ctx),
+	}
 	scheduler := s.getOpenAIAccountScheduler()
 	if scheduler == nil {
 		selection, err := s.SelectAccountWithLoadAwareness(ctx, groupID, sessionHash, requestedModel, excludedIDs)
@@ -891,6 +994,30 @@ func (s *OpenAIGatewayService) openAIWSLBTopK() int {
 		return s.cfg.Gateway.OpenAIWS.LBTopK
 	}
 	return 7
+}
+
+func (s *OpenAIGatewayService) openAIWSSchedulerMode(ctx context.Context) string {
+	if s != nil && s.settingService != nil {
+		enabled, state := s.settingService.openAIStrictSchedulerSetting(ctx)
+		switch state {
+		case openAIStrictSchedulerStatePresent:
+			if enabled {
+				return "strict_priority_fallback"
+			}
+			return "weighted_topk"
+		case openAIStrictSchedulerStateMissing:
+			if s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.SchedulerMode != "" {
+				return s.cfg.Gateway.OpenAIWS.SchedulerMode
+			}
+			return "weighted_topk"
+		default:
+			return "weighted_topk"
+		}
+	}
+	if s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.SchedulerMode != "" {
+		return s.cfg.Gateway.OpenAIWS.SchedulerMode
+	}
+	return "weighted_topk"
 }
 
 func (s *OpenAIGatewayService) openAIWSSchedulerWeights() GatewayOpenAIWSSchedulerScoreWeightsView {

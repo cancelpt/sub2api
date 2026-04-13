@@ -500,6 +500,7 @@ func TestAPIContracts(t *testing.T) {
 					service.SettingKeyOpsRealtimeMonitoringEnabled: "true",
 					service.SettingKeyOpsQueryModeDefault:          "auto",
 					service.SettingKeyOpsMetricsIntervalSeconds:    "60",
+					service.SettingKeyOpenAIStrictSchedulerEnabled: "true",
 				})
 			},
 			method:     http.MethodGet,
@@ -582,6 +583,7 @@ func TestAPIContracts(t *testing.T) {
 						"table_page_size_options": [10, 20, 50, 100],
 					"min_claude_code_version": "",
 					"max_claude_code_version": "",
+					"openai_strict_scheduler_enabled": true,
 					"allow_ungrouped_key_scheduling": false,
 					"backend_mode_enabled": false,
 					"enable_cch_signing": false,

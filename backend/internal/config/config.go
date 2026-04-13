@@ -554,6 +554,8 @@ type GatewayOpenAIWSConfig struct {
 	StickyResponseIDTTLSeconds int `mapstructure:"sticky_response_id_ttl_seconds"`
 	// StickyPreviousResponseTTLSeconds: 兼容旧键（当新键未设置时回退）
 	StickyPreviousResponseTTLSeconds int `mapstructure:"sticky_previous_response_ttl_seconds"`
+	// SchedulerMode: 账号调度模式（weighted_topk|strict_priority_fallback）
+	SchedulerMode string `mapstructure:"scheduler_mode"`
 
 	SchedulerScoreWeights GatewayOpenAIWSSchedulerScoreWeights `mapstructure:"scheduler_score_weights"`
 }
@@ -1399,6 +1401,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_ws.metadata_bridge_enabled", true)
 	viper.SetDefault("gateway.openai_ws.sticky_response_id_ttl_seconds", 3600)
 	viper.SetDefault("gateway.openai_ws.sticky_previous_response_ttl_seconds", 3600)
+	viper.SetDefault("gateway.openai_ws.scheduler_mode", "weighted_topk")
 	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.priority", 1.0)
 	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.load", 1.0)
 	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.queue", 0.7)
@@ -2074,6 +2077,13 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.OpenAIWS.StickyPreviousResponseTTLSeconds < 0 {
 		return fmt.Errorf("gateway.openai_ws.sticky_previous_response_ttl_seconds must be non-negative")
+	}
+	switch c.Gateway.OpenAIWS.SchedulerMode {
+	case "weighted_topk", "strict_priority_fallback":
+	case "":
+		c.Gateway.OpenAIWS.SchedulerMode = "weighted_topk"
+	default:
+		return fmt.Errorf("gateway.openai_ws.scheduler_mode must be one of weighted_topk|strict_priority_fallback")
 	}
 	if c.Gateway.OpenAIWS.SchedulerScoreWeights.Priority < 0 ||
 		c.Gateway.OpenAIWS.SchedulerScoreWeights.Load < 0 ||

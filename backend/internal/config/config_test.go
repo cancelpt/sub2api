@@ -158,6 +158,9 @@ func TestLoadDefaultOpenAIWSConfig(t *testing.T) {
 	if cfg.Gateway.OpenAIWS.IngressModeDefault != "ctx_pool" {
 		t.Fatalf("Gateway.OpenAIWS.IngressModeDefault = %q, want %q", cfg.Gateway.OpenAIWS.IngressModeDefault, "ctx_pool")
 	}
+	if cfg.Gateway.OpenAIWS.SchedulerMode != "weighted_topk" {
+		t.Fatalf("Gateway.OpenAIWS.SchedulerMode = %q, want %q", cfg.Gateway.OpenAIWS.SchedulerMode, "weighted_topk")
+	}
 }
 
 func TestLoadOpenAIWSStickyTTLCompatibility(t *testing.T) {
@@ -1532,6 +1535,52 @@ func TestValidateConfig_OpenAIWSRules(t *testing.T) {
 			require.Contains(t, err.Error(), tc.wantErr)
 		})
 	}
+}
+
+func TestValidateConfig_OpenAIWSSchedulerMode(t *testing.T) {
+	buildValid := func(t *testing.T) *Config {
+		t.Helper()
+		resetViperWithJWTSecret(t)
+		cfg, err := Load()
+		require.NoError(t, err)
+		return cfg
+	}
+
+	t.Run("supports weighted_topk", func(t *testing.T) {
+		cfg := buildValid(t)
+		cfg.Gateway.OpenAIWS.SchedulerMode = "weighted_topk"
+		require.NoError(t, cfg.Validate())
+	})
+
+	t.Run("supports strict_priority_fallback", func(t *testing.T) {
+		cfg := buildValid(t)
+		cfg.Gateway.OpenAIWS.SchedulerMode = "strict_priority_fallback"
+		require.NoError(t, cfg.Validate())
+	})
+
+	t.Run("rejects unsupported value", func(t *testing.T) {
+		cfg := buildValid(t)
+		cfg.Gateway.OpenAIWS.SchedulerMode = "unknown_mode"
+		err := cfg.Validate()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "gateway.openai_ws.scheduler_mode must be one of weighted_topk|strict_priority_fallback")
+	})
+
+	t.Run("rejects mixed case value", func(t *testing.T) {
+		cfg := buildValid(t)
+		cfg.Gateway.OpenAIWS.SchedulerMode = "Weighted_TopK"
+		err := cfg.Validate()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "gateway.openai_ws.scheduler_mode must be one of weighted_topk|strict_priority_fallback")
+	})
+
+	t.Run("rejects value with surrounding whitespace", func(t *testing.T) {
+		cfg := buildValid(t)
+		cfg.Gateway.OpenAIWS.SchedulerMode = " strict_priority_fallback "
+		err := cfg.Validate()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "gateway.openai_ws.scheduler_mode must be one of weighted_topk|strict_priority_fallback")
+	})
 }
 
 func TestValidateConfig_AutoScaleDisabledIgnoreAutoScaleFields(t *testing.T) {

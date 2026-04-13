@@ -274,6 +274,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 		reqLog.Debug("openai.account_schedule_decision",
 			zap.String("layer", scheduleDecision.Layer),
+			zap.String("scheduler_mode", scheduleDecision.SchedulerMode),
 			zap.Bool("sticky_previous_hit", scheduleDecision.StickyPreviousHit),
 			zap.Bool("sticky_session_hit", scheduleDecision.StickySessionHit),
 			zap.Int("candidate_count", scheduleDecision.CandidateCount),
@@ -1210,6 +1211,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		zap.Int64("account_id", account.ID),
 		zap.String("account_name", account.Name),
 		zap.String("schedule_layer", scheduleDecision.Layer),
+		zap.String("scheduler_mode", scheduleDecision.SchedulerMode),
 		zap.Int("candidate_count", scheduleDecision.CandidateCount),
 	)
 

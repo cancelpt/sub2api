@@ -4344,7 +4344,10 @@ export default {
       },
       scheduling: {
         title: 'Gateway Scheduling Settings',
-        description: 'Control API Key scheduling behavior',
+        description: 'Control gateway scheduling behavior',
+        openaiStrictScheduler: 'OpenAI Strict Primary Fallback',
+        openaiStrictSchedulerHint:
+          'When enabled, new OpenAI requests prefer higher-priority accounts and only fall back when the primary cannot schedule. When disabled, scheduling uses weighted_topk. Sticky previous_response_id and session_hash routing remain unchanged.',
         allowUngroupedKey: 'Allow Ungrouped Key Scheduling',
         allowUngroupedKeyHint: 'When disabled, API Keys not assigned to any group cannot make requests (403 Forbidden). Keep disabled to ensure all Keys belong to a specific group.'
       },

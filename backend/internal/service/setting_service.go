@@ -79,6 +79,28 @@ const backendModeCacheTTL = 60 * time.Second
 const backendModeErrorTTL = 5 * time.Second
 const backendModeDBTimeout = 5 * time.Second
 
+// cachedOpenAIStrictScheduler OpenAI 严格调度开关缓存（进程内缓存，60s TTL）
+type cachedOpenAIStrictScheduler struct {
+	state     openAIStrictSchedulerState
+	enabled   bool
+	expiresAt int64 // unix nano
+}
+
+var openAIStrictSchedulerCache atomic.Value // *cachedOpenAIStrictScheduler
+var openAIStrictSchedulerSF singleflight.Group
+
+const openAIStrictSchedulerCacheTTL = 60 * time.Second
+const openAIStrictSchedulerErrorTTL = 5 * time.Second
+const openAIStrictSchedulerDBTimeout = 5 * time.Second
+
+type openAIStrictSchedulerState uint8
+
+const (
+	openAIStrictSchedulerStateUnavailable openAIStrictSchedulerState = iota
+	openAIStrictSchedulerStateMissing
+	openAIStrictSchedulerStatePresent
+)
+
 // cachedGatewayForwardingSettings 缓存网关转发行为设置（进程内缓存，60s TTL）
 type cachedGatewayForwardingSettings struct {
 	fingerprintUnification bool
@@ -584,6 +606,9 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 	updates[SettingKeyMinClaudeCodeVersion] = settings.MinClaudeCodeVersion
 	updates[SettingKeyMaxClaudeCodeVersion] = settings.MaxClaudeCodeVersion
 
+	// OpenAI runtime scheduler toggle
+	updates[SettingKeyOpenAIStrictSchedulerEnabled] = strconv.FormatBool(settings.OpenAIStrictSchedulerEnabled)
+
 	// 分组隔离
 	updates[SettingKeyAllowUngroupedKeyScheduling] = strconv.FormatBool(settings.AllowUngroupedKeyScheduling)
 
@@ -608,6 +633,12 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 		backendModeCache.Store(&cachedBackendMode{
 			value:     settings.BackendModeEnabled,
 			expiresAt: time.Now().Add(backendModeCacheTTL).UnixNano(),
+		})
+		openAIStrictSchedulerSF.Forget("openai_strict_scheduler")
+		openAIStrictSchedulerCache.Store(&cachedOpenAIStrictScheduler{
+			state:     openAIStrictSchedulerStatePresent,
+			enabled:   settings.OpenAIStrictSchedulerEnabled,
+			expiresAt: time.Now().Add(openAIStrictSchedulerCacheTTL).UnixNano(),
 		})
 		gatewayForwardingSF.Forget("gateway_forwarding")
 		gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{
@@ -933,6 +964,9 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyMinClaudeCodeVersion: "",
 		SettingKeyMaxClaudeCodeVersion: "",
 
+		// OpenAI 调度默认保持 weighted_topk
+		SettingKeyOpenAIStrictSchedulerEnabled: "false",
+
 		// 分组隔离（默认不允许未分组 Key 调度）
 		SettingKeyAllowUngroupedKeyScheduling: "false",
 	}
@@ -1204,6 +1238,13 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	// Claude Code version check
 	result.MinClaudeCodeVersion = settings[SettingKeyMinClaudeCodeVersion]
 	result.MaxClaudeCodeVersion = settings[SettingKeyMaxClaudeCodeVersion]
+
+	// OpenAI runtime scheduler toggle
+	if v, ok := settings[SettingKeyOpenAIStrictSchedulerEnabled]; ok && v != "" {
+		result.OpenAIStrictSchedulerEnabled = v == "true"
+	} else {
+		result.OpenAIStrictSchedulerEnabled = s.defaultOpenAIStrictSchedulerEnabled()
+	}
 
 	// 分组隔离
 	result.AllowUngroupedKeyScheduling = settings[SettingKeyAllowUngroupedKeyScheduling] == "true"
@@ -1917,6 +1958,75 @@ func (s *SettingService) IsUngroupedKeySchedulingAllowed(ctx context.Context) bo
 		return false // fail-closed: 查询失败时默认不允许
 	}
 	return value == "true"
+}
+
+// IsOpenAIStrictSchedulerEnabled 查询 OpenAI 严格调度开关
+// 使用进程内 atomic.Value 缓存，60 秒 TTL，热路径零锁开销
+func (s *SettingService) IsOpenAIStrictSchedulerEnabled(ctx context.Context) bool {
+	enabled, state := s.openAIStrictSchedulerSetting(ctx)
+	return state == openAIStrictSchedulerStatePresent && enabled
+}
+
+func (s *SettingService) defaultOpenAIStrictSchedulerEnabled() bool {
+	return s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.SchedulerMode == "strict_priority_fallback"
+}
+
+func (s *SettingService) openAIStrictSchedulerSetting(ctx context.Context) (bool, openAIStrictSchedulerState) {
+	if s == nil || s.settingRepo == nil {
+		return false, openAIStrictSchedulerStateUnavailable
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if cached, ok := openAIStrictSchedulerCache.Load().(*cachedOpenAIStrictScheduler); ok && cached != nil {
+		if time.Now().UnixNano() < cached.expiresAt {
+			return cached.enabled, cached.state
+		}
+	}
+
+	result, _, _ := openAIStrictSchedulerSF.Do("openai_strict_scheduler", func() (any, error) {
+		if cached, ok := openAIStrictSchedulerCache.Load().(*cachedOpenAIStrictScheduler); ok && cached != nil {
+			if time.Now().UnixNano() < cached.expiresAt {
+				return cached, nil
+			}
+		}
+
+		dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), openAIStrictSchedulerDBTimeout)
+		defer cancel()
+		value, err := s.settingRepo.GetValue(dbCtx, SettingKeyOpenAIStrictSchedulerEnabled)
+		if err != nil {
+			if errors.Is(err, ErrSettingNotFound) {
+				cached := &cachedOpenAIStrictScheduler{
+					state:     openAIStrictSchedulerStateMissing,
+					enabled:   false,
+					expiresAt: time.Now().Add(openAIStrictSchedulerCacheTTL).UnixNano(),
+				}
+				openAIStrictSchedulerCache.Store(cached)
+				return cached, nil
+			}
+			slog.Warn("failed to get openai strict scheduler setting", "error", err)
+			cached := &cachedOpenAIStrictScheduler{
+				state:     openAIStrictSchedulerStateUnavailable,
+				enabled:   false,
+				expiresAt: time.Now().Add(openAIStrictSchedulerErrorTTL).UnixNano(),
+			}
+			openAIStrictSchedulerCache.Store(cached)
+			return cached, nil
+		}
+
+		enabled := value == "true"
+		cached := &cachedOpenAIStrictScheduler{
+			state:     openAIStrictSchedulerStatePresent,
+			enabled:   enabled,
+			expiresAt: time.Now().Add(openAIStrictSchedulerCacheTTL).UnixNano(),
+		}
+		openAIStrictSchedulerCache.Store(cached)
+		return cached, nil
+	})
+	if cached, ok := result.(*cachedOpenAIStrictScheduler); ok && cached != nil {
+		return cached.enabled, cached.state
+	}
+	return false, openAIStrictSchedulerStateUnavailable
 }
 
 // GetClaudeCodeVersionBounds 获取 Claude Code 版本号上下限要求

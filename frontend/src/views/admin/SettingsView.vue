@@ -1642,7 +1642,19 @@
               {{ t('admin.settings.scheduling.description') }}
             </p>
           </div>
-          <div class="p-6">
+          <div class="space-y-5 p-6">
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.scheduling.openaiStrictScheduler') }}
+                </label>
+                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.scheduling.openaiStrictSchedulerHint') }}
+                </p>
+              </div>
+              <Toggle v-model="form.openai_strict_scheduler_enabled" />
+            </div>
+
             <div class="flex items-center justify-between">
               <div>
                 <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -2738,6 +2750,7 @@ const form = reactive<SettingsForm>({
   // Claude Code version check
   min_claude_code_version: '',
   max_claude_code_version: '',
+  openai_strict_scheduler_enabled: false,
   // 分组隔离
   allow_ungrouped_key_scheduling: false,
   // Gateway forwarding behavior
@@ -3138,6 +3151,7 @@ async function saveSettings() {
       identity_patch_prompt: form.identity_patch_prompt,
       min_claude_code_version: form.min_claude_code_version,
       max_claude_code_version: form.max_claude_code_version,
+      openai_strict_scheduler_enabled: form.openai_strict_scheduler_enabled,
       allow_ungrouped_key_scheduling: form.allow_ungrouped_key_scheduling,
       enable_fingerprint_unification: form.enable_fingerprint_unification,
       enable_metadata_passthrough: form.enable_metadata_passthrough,

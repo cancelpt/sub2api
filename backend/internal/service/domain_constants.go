@@ -239,6 +239,9 @@ const (
 	// SettingKeyAllowUngroupedKeyScheduling 允许未分组 API Key 调度（默认 false：未分组 Key 返回 403）
 	SettingKeyAllowUngroupedKeyScheduling = "allow_ungrouped_key_scheduling"
 
+	// SettingKeyOpenAIStrictSchedulerEnabled 是否启用 OpenAI 严格主优先回切调度（默认 false => weighted_topk）
+	SettingKeyOpenAIStrictSchedulerEnabled = "openai_strict_scheduler_enabled"
+
 	// SettingKeyBackendModeEnabled Backend 模式：禁用用户注册和自助服务，仅管理员可登录
 	SettingKeyBackendModeEnabled = "backend_mode_enabled"
 

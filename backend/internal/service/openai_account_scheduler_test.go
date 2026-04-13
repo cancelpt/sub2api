@@ -18,6 +18,66 @@ type openAISnapshotCacheStub struct {
 	accountsByID     map[int64]*Account
 }
 
+type openAISchedulerSettingRepoStub struct {
+	values map[string]string
+	err    error
+}
+
+func (s *openAISchedulerSettingRepoStub) Get(context.Context, string) (*Setting, error) {
+	panic("unexpected Get call")
+}
+
+func (s *openAISchedulerSettingRepoStub) GetValue(_ context.Context, key string) (string, error) {
+	if s.err != nil {
+		return "", s.err
+	}
+	if s.values == nil {
+		return "", ErrSettingNotFound
+	}
+	value, ok := s.values[key]
+	if !ok {
+		return "", ErrSettingNotFound
+	}
+	return value, nil
+}
+
+func (s *openAISchedulerSettingRepoStub) Set(context.Context, string, string) error {
+	panic("unexpected Set call")
+}
+
+func (s *openAISchedulerSettingRepoStub) GetMultiple(context.Context, []string) (map[string]string, error) {
+	panic("unexpected GetMultiple call")
+}
+
+func (s *openAISchedulerSettingRepoStub) SetMultiple(_ context.Context, settings map[string]string) error {
+	if s.values == nil {
+		s.values = make(map[string]string, len(settings))
+	}
+	for key, value := range settings {
+		s.values[key] = value
+	}
+	return nil
+}
+
+func (s *openAISchedulerSettingRepoStub) GetAll(context.Context) (map[string]string, error) {
+	panic("unexpected GetAll call")
+}
+
+func (s *openAISchedulerSettingRepoStub) Delete(context.Context, string) error {
+	panic("unexpected Delete call")
+}
+
+func resetOpenAIStrictSchedulerTestCache(t *testing.T) {
+	t.Helper()
+
+	openAIStrictSchedulerSF.Forget("openai_strict_scheduler")
+	openAIStrictSchedulerCache.Store((*cachedOpenAIStrictScheduler)(nil))
+	t.Cleanup(func() {
+		openAIStrictSchedulerSF.Forget("openai_strict_scheduler")
+		openAIStrictSchedulerCache.Store((*cachedOpenAIStrictScheduler)(nil))
+	})
+}
+
 func (s *openAISnapshotCacheStub) GetSnapshot(ctx context.Context, bucket SchedulerBucket) ([]*Account, bool, error) {
 	if len(s.snapshotAccounts) == 0 {
 		return nil, false, nil
@@ -548,6 +608,345 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceTopKFallback
 	}
 }
 
+func TestOpenAIGatewayService_SelectAccountWithScheduler_StrictPriorityFallbackPrefersPrimaryForFreshRequest(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(1013)
+	accounts := []Account{
+		{
+			ID:          6101,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    43,
+		},
+		{
+			ID:          6102,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    50,
+		},
+	}
+
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "strict_priority_fallback"
+	cfg.Gateway.OpenAIWS.LBTopK = 1
+
+	cache := &stubGatewayCache{sessionBindings: map[string]int64{}}
+	concurrencyCache := stubConcurrencyCache{
+		loadMap: map[int64]*AccountLoadInfo{
+			6101: {AccountID: 6101, LoadRate: 95, WaitingCount: 9},
+			6102: {AccountID: 6102, LoadRate: 0, WaitingCount: 0},
+		},
+		acquireResults: map[int64]bool{
+			6101: true,
+			6102: true,
+		},
+	}
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: accounts},
+		cache:              cache,
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(concurrencyCache),
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(
+		ctx,
+		&groupID,
+		"",
+		"strict_priority_fresh",
+		"gpt-5.1",
+		nil,
+		OpenAIUpstreamTransportAny,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, int64(6101), selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.Equal(t, "strict_priority_fallback", decision.SchedulerMode)
+	require.Equal(t, 2, decision.CandidateCount)
+	require.Equal(t, 1, decision.TopK)
+	require.Equal(t, int64(6101), cache.sessionBindings["openai:strict_priority_fresh"])
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_StrictPriorityFallbackFallsThroughWhenPrimaryBusy(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(1014)
+	accounts := []Account{
+		{
+			ID:          6201,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    43,
+		},
+		{
+			ID:          6202,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    50,
+		},
+	}
+
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "strict_priority_fallback"
+	cfg.Gateway.OpenAIWS.LBTopK = 1
+
+	cache := &stubGatewayCache{sessionBindings: map[string]int64{}}
+	concurrencyCache := stubConcurrencyCache{
+		loadMap: map[int64]*AccountLoadInfo{
+			6201: {AccountID: 6201, LoadRate: 0, WaitingCount: 0},
+			6202: {AccountID: 6202, LoadRate: 80, WaitingCount: 6},
+		},
+		acquireResults: map[int64]bool{
+			6201: false,
+			6202: true,
+		},
+	}
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: accounts},
+		cache:              cache,
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(concurrencyCache),
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(
+		ctx,
+		&groupID,
+		"",
+		"strict_priority_fallback",
+		"gpt-5.1",
+		nil,
+		OpenAIUpstreamTransportAny,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, int64(6202), selection.Account.ID)
+	require.True(t, selection.Acquired)
+	require.Nil(t, selection.WaitPlan)
+	require.Equal(t, "strict_priority_fallback", decision.SchedulerMode)
+	require.Equal(t, int64(6202), cache.sessionBindings["openai:strict_priority_fallback"])
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_StrictPriorityFallbackKeepsBackupStickySession(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(1015)
+	accounts := []Account{
+		{
+			ID:          6301,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    43,
+		},
+		{
+			ID:          6302,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    50,
+		},
+	}
+
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "strict_priority_fallback"
+	cache := &stubGatewayCache{
+		sessionBindings: map[string]int64{
+			"openai:sticky_backup_session": 6302,
+		},
+	}
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: accounts},
+		cache:              cache,
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{acquireResults: map[int64]bool{6302: true}}),
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(
+		ctx,
+		&groupID,
+		"",
+		"sticky_backup_session",
+		"gpt-5.1",
+		nil,
+		OpenAIUpstreamTransportAny,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, int64(6302), selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerSessionSticky, decision.Layer)
+	require.True(t, decision.StickySessionHit)
+	require.Equal(t, "strict_priority_fallback", decision.SchedulerMode)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_StrictPriorityFallbackAfterStickyExpiryReturnsToPrimary(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(1016)
+	accounts := []Account{
+		{
+			ID:          6401,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    43,
+		},
+		{
+			ID:          6402,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    50,
+		},
+	}
+
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "strict_priority_fallback"
+	cfg.Gateway.OpenAIWS.LBTopK = 1
+
+	// Sticky expiry is emulated by the binding no longer existing in cache.
+	cache := &stubGatewayCache{sessionBindings: map[string]int64{}}
+	concurrencyCache := stubConcurrencyCache{
+		loadMap: map[int64]*AccountLoadInfo{
+			6401: {AccountID: 6401, LoadRate: 88, WaitingCount: 7},
+			6402: {AccountID: 6402, LoadRate: 0, WaitingCount: 0},
+		},
+		acquireResults: map[int64]bool{
+			6401: true,
+			6402: true,
+		},
+	}
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: accounts},
+		cache:              cache,
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(concurrencyCache),
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(
+		ctx,
+		&groupID,
+		"",
+		"expired_backup_binding",
+		"gpt-5.1",
+		nil,
+		OpenAIUpstreamTransportAny,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, int64(6401), selection.Account.ID)
+	require.Equal(t, "strict_priority_fallback", decision.SchedulerMode)
+	require.Equal(t, int64(6401), cache.sessionBindings["openai:expired_backup_binding"])
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_StrictPriorityFallbackWaitsOnPrimaryTierFirst(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(1017)
+	accounts := []Account{
+		{
+			ID:          6501,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    43,
+		},
+		{
+			ID:          6502,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    50,
+		},
+	}
+
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "strict_priority_fallback"
+	cfg.Gateway.OpenAIWS.LBTopK = 1
+	cfg.Gateway.Scheduling.FallbackMaxWaiting = 12
+	cfg.Gateway.Scheduling.FallbackWaitTimeout = 20 * time.Second
+
+	cache := &stubGatewayCache{sessionBindings: map[string]int64{}}
+	concurrencyCache := stubConcurrencyCache{
+		loadMap: map[int64]*AccountLoadInfo{
+			6501: {AccountID: 6501, LoadRate: 90, WaitingCount: 8},
+			6502: {AccountID: 6502, LoadRate: 0, WaitingCount: 0},
+		},
+		acquireResults: map[int64]bool{
+			6501: false,
+			6502: false,
+		},
+	}
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: accounts},
+		cache:              cache,
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(concurrencyCache),
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(
+		ctx,
+		&groupID,
+		"",
+		"strict_priority_wait",
+		"gpt-5.1",
+		nil,
+		OpenAIUpstreamTransportAny,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.False(t, selection.Acquired)
+	require.NotNil(t, selection.WaitPlan)
+	require.Equal(t, int64(6501), selection.Account.ID)
+	require.Equal(t, int64(6501), selection.WaitPlan.AccountID)
+	require.Equal(t, 12, selection.WaitPlan.MaxWaiting)
+	require.Equal(t, 20*time.Second, selection.WaitPlan.Timeout)
+	require.Equal(t, "strict_priority_fallback", decision.SchedulerMode)
+	_, hasStickyBinding := cache.sessionBindings["openai:strict_priority_wait"]
+	require.False(t, hasStickyBinding)
+}
+
 func TestOpenAIGatewayService_OpenAIAccountSchedulerMetrics(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(12)
@@ -912,6 +1311,7 @@ func TestOpenAIGatewayService_SchedulerWrappersAndDefaults(t *testing.T) {
 	snapshot := svc.SnapshotOpenAIAccountSchedulerMetrics()
 	require.GreaterOrEqual(t, snapshot.AccountSwitchTotal, int64(1))
 	require.Equal(t, 7, svc.openAIWSLBTopK())
+	require.Equal(t, "weighted_topk", svc.openAIWSSchedulerMode(context.Background()))
 	require.Equal(t, openaiStickySessionTTL, svc.openAIWSSessionStickyTTL())
 
 	defaultWeights := svc.openAIWSSchedulerWeights()
@@ -923,6 +1323,7 @@ func TestOpenAIGatewayService_SchedulerWrappersAndDefaults(t *testing.T) {
 
 	cfg := &config.Config{}
 	cfg.Gateway.OpenAIWS.LBTopK = 9
+	cfg.Gateway.OpenAIWS.SchedulerMode = "strict_priority_fallback"
 	cfg.Gateway.OpenAIWS.StickySessionTTLSeconds = 180
 	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Priority = 0.2
 	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Load = 0.3
@@ -932,6 +1333,7 @@ func TestOpenAIGatewayService_SchedulerWrappersAndDefaults(t *testing.T) {
 	svcWithCfg := &OpenAIGatewayService{cfg: cfg}
 
 	require.Equal(t, 9, svcWithCfg.openAIWSLBTopK())
+	require.Equal(t, "strict_priority_fallback", svcWithCfg.openAIWSSchedulerMode(context.Background()))
 	require.Equal(t, 180*time.Second, svcWithCfg.openAIWSSessionStickyTTL())
 	customWeights := svcWithCfg.openAIWSSchedulerWeights()
 	require.Equal(t, 0.2, customWeights.Priority)
@@ -939,6 +1341,78 @@ func TestOpenAIGatewayService_SchedulerWrappersAndDefaults(t *testing.T) {
 	require.Equal(t, 0.4, customWeights.Queue)
 	require.Equal(t, 0.5, customWeights.ErrorRate)
 	require.Equal(t, 0.6, customWeights.TTFT)
+}
+
+func TestOpenAIGatewayService_OpenAIWSSchedulerMode_UsesRuntimeSetting(t *testing.T) {
+	resetOpenAIStrictSchedulerTestCache(t)
+
+	repo := &openAISchedulerSettingRepoStub{}
+	settingSvc := NewSettingService(repo, &config.Config{})
+	require.NoError(t, settingSvc.UpdateSettings(context.Background(), &SystemSettings{
+		OpenAIStrictSchedulerEnabled: true,
+	}))
+	svc := &OpenAIGatewayService{settingService: settingSvc}
+
+	require.Equal(t, "strict_priority_fallback", svc.openAIWSSchedulerMode(context.Background()))
+}
+
+func TestOpenAIGatewayService_OpenAIWSSchedulerMode_RuntimeSettingOverridesConfig(t *testing.T) {
+	resetOpenAIStrictSchedulerTestCache(t)
+
+	repo := &openAISchedulerSettingRepoStub{}
+	settingSvc := NewSettingService(repo, &config.Config{})
+	require.NoError(t, settingSvc.UpdateSettings(context.Background(), &SystemSettings{
+		OpenAIStrictSchedulerEnabled: false,
+	}))
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "strict_priority_fallback"
+
+	svc := &OpenAIGatewayService{
+		cfg:            cfg,
+		settingService: settingSvc,
+	}
+
+	require.Equal(t, "weighted_topk", svc.openAIWSSchedulerMode(context.Background()))
+}
+
+func TestOpenAIGatewayService_OpenAIWSSchedulerMode_MissingRuntimeSettingFallsBackToConfig(t *testing.T) {
+	resetOpenAIStrictSchedulerTestCache(t)
+
+	settingSvc := NewSettingService(&openAISchedulerSettingRepoStub{}, &config.Config{})
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "strict_priority_fallback"
+
+	svc := &OpenAIGatewayService{
+		cfg:            cfg,
+		settingService: settingSvc,
+	}
+
+	require.Equal(t, "strict_priority_fallback", svc.openAIWSSchedulerMode(context.Background()))
+}
+
+func TestOpenAIGatewayService_OpenAIWSSchedulerMode_MissingRuntimeSettingDefaultsToTopKWhenConfigUnset(t *testing.T) {
+	resetOpenAIStrictSchedulerTestCache(t)
+
+	settingSvc := NewSettingService(&openAISchedulerSettingRepoStub{}, &config.Config{})
+	svc := &OpenAIGatewayService{
+		settingService: settingSvc,
+	}
+
+	require.Equal(t, "weighted_topk", svc.openAIWSSchedulerMode(context.Background()))
+}
+
+func TestOpenAIGatewayService_OpenAIWSSchedulerMode_RuntimeSettingDBErrorDoesNotFallbackToConfig(t *testing.T) {
+	resetOpenAIStrictSchedulerTestCache(t)
+
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "strict_priority_fallback"
+	settingSvc := NewSettingService(&openAISchedulerSettingRepoStub{err: fmt.Errorf("db down")}, &config.Config{})
+	svc := &OpenAIGatewayService{
+		cfg:            cfg,
+		settingService: settingSvc,
+	}
+
+	require.Equal(t, "weighted_topk", svc.openAIWSSchedulerMode(context.Background()))
 }
 
 func TestDefaultOpenAIAccountScheduler_IsAccountTransportCompatible_Branches(t *testing.T) {

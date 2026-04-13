@@ -4506,7 +4506,10 @@ export default {
       },
       scheduling: {
         title: '网关调度设置',
-        description: '控制 API Key 的调度行为',
+        description: '控制网关调度行为',
+        openaiStrictScheduler: 'OpenAI 严格主优先回切',
+        openaiStrictSchedulerHint:
+          '开启后，新的 OpenAI 请求会优先尝试更高优先级账号，只有主账号不可调度时才回落；关闭后恢复 weighted_topk。已有的 previous_response_id 和 session_hash 粘性路由不受影响。',
         allowUngroupedKey: '允许未分组 Key 调度',
         allowUngroupedKeyHint: '关闭后，未分配到任何分组的 API Key 将无法发起请求（返回 403）。建议保持关闭以确保所有 Key 都归属明确的分组。'
       },

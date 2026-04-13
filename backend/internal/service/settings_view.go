@@ -96,6 +96,9 @@ type SystemSettings struct {
 	MinClaudeCodeVersion string
 	MaxClaudeCodeVersion string
 
+	// OpenAI 调度模式运行时开关：false=weighted_topk，true=strict_priority_fallback
+	OpenAIStrictSchedulerEnabled bool
+
 	// 分组隔离：允许未分组 Key 调度（默认 false → 403）
 	AllowUngroupedKeyScheduling bool
 
