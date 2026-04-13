@@ -99,3 +99,33 @@ func TestSettingHandler_UpdateSettings_PreservesOpenAIStrictSchedulerWhenFieldOm
 	require.Equal(t, "true", repo.all[service.SettingKeyOpenAIStrictSchedulerEnabled])
 	require.Contains(t, recorder.Body.String(), `"openai_strict_scheduler_enabled":true`)
 }
+
+func TestSettingHandler_UpdateSettings_PreservesOpenAIStrictRetrySettingsWhenFieldsOmitted(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := &settingHandlerRepoStub{
+		all: map[string]string{
+			service.SettingKeyRegistrationEnabled:          "true",
+			service.SettingKeyOpenAIStrictSchedulerEnabled: "true",
+			"openai_strict_retry_enabled":                  "true",
+			"openai_strict_retry_count":                    "4",
+		},
+	}
+	settingService := service.NewSettingService(repo, &config.Config{})
+	handler := NewSettingHandler(settingService, nil, nil, nil, nil, nil)
+
+	router := gin.New()
+	router.PUT("/settings", handler.UpdateSettings)
+
+	req := httptest.NewRequest(http.MethodPut, "/settings", bytes.NewBufferString(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, "true", repo.all["openai_strict_retry_enabled"])
+	require.Equal(t, "4", repo.all["openai_strict_retry_count"])
+	require.Contains(t, recorder.Body.String(), `"openai_strict_retry_enabled":true`)
+	require.Contains(t, recorder.Body.String(), `"openai_strict_retry_count":4`)
+}

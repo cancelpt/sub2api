@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -208,7 +209,7 @@ func TestSettingService_UpdateSettings_TablePreferences(t *testing.T) {
 	svc := NewSettingService(repo, &config.Config{})
 
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{
-		TableDefaultPageSize:  50,
+		TableDefaultPageSize: 50,
 		TablePageSizeOptions: []int{20, 50, 100},
 	})
 	require.NoError(t, err)
@@ -216,7 +217,7 @@ func TestSettingService_UpdateSettings_TablePreferences(t *testing.T) {
 	require.Equal(t, "[20,50,100]", repo.updates[SettingKeyTablePageSizeOptions])
 
 	err = svc.UpdateSettings(context.Background(), &SystemSettings{
-		TableDefaultPageSize:  1000,
+		TableDefaultPageSize: 1000,
 		TablePageSizeOptions: []int{20, 100},
 	})
 	require.NoError(t, err)
@@ -233,4 +234,20 @@ func TestSettingService_UpdateSettings_PersistsOpenAIStrictSchedulerToggle(t *te
 	})
 	require.NoError(t, err)
 	require.Equal(t, "true", repo.updates[SettingKeyOpenAIStrictSchedulerEnabled])
+}
+
+func TestSettingService_UpdateSettings_PersistsOpenAIStrictRetrySettings(t *testing.T) {
+	repo := &settingUpdateRepoStub{}
+	svc := NewSettingService(repo, &config.Config{})
+	settings := &SystemSettings{
+		OpenAIStrictSchedulerEnabled: true,
+	}
+	reflect.ValueOf(settings).Elem().FieldByName("OpenAIStrictRetryEnabled").SetBool(true)
+	reflect.ValueOf(settings).Elem().FieldByName("OpenAIStrictRetryCount").SetInt(5)
+
+	err := svc.UpdateSettings(context.Background(), settings)
+	require.NoError(t, err)
+	require.Equal(t, "true", repo.updates[SettingKeyOpenAIStrictSchedulerEnabled])
+	require.Equal(t, "true", repo.updates["openai_strict_retry_enabled"])
+	require.Equal(t, "5", repo.updates["openai_strict_retry_count"])
 }

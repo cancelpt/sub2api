@@ -1804,6 +1804,64 @@ func (s *OpenAIGatewayService) handleFailoverSideEffects(ctx context.Context, re
 	s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, body)
 }
 
+func retryLimitPtr(v int) *int {
+	return &v
+}
+
+func (s *OpenAIGatewayService) openAISameAccountRetryPolicy(
+	ctx context.Context,
+	account *Account,
+	statusCode int,
+	upstreamMsg string,
+	upstreamBody []byte,
+	includeTransient bool,
+) (bool, *int) {
+	if account == nil {
+		return false, nil
+	}
+
+	poolRetryable := account.IsPoolMode() && isPoolModeRetryableStatus(statusCode)
+	if includeTransient && account.IsPoolMode() && isOpenAITransientProcessingError(statusCode, upstreamMsg, upstreamBody) {
+		poolRetryable = true
+	}
+	if poolRetryable {
+		retryLimit := account.GetPoolModeRetryCount()
+		return true, retryLimitPtr(retryLimit)
+	}
+
+	retryEnabled, retryLimit := s.openAIStrictSameAccountRetryPolicy(ctx, account, statusCode)
+	if retryEnabled {
+		return true, retryLimitPtr(retryLimit)
+	}
+	return false, nil
+}
+
+func (s *OpenAIGatewayService) openAIStrictSameAccountRetryPolicy(
+	ctx context.Context,
+	account *Account,
+	statusCode int,
+) (bool, int) {
+	if s == nil || s.settingService == nil || account == nil {
+		return false, 0
+	}
+
+	settings := s.settingService.openAIStrictSchedulerSettings(ctx)
+	strictEnabled := false
+	switch settings.state {
+	case openAIStrictSchedulerStatePresent:
+		strictEnabled = settings.enabled
+	case openAIStrictSchedulerStateMissing:
+		strictEnabled = s.settingService.defaultOpenAIStrictSchedulerEnabled()
+	}
+	if !strictEnabled || !settings.retryEnabled {
+		return false, 0
+	}
+	if account.ShouldHandleErrorCode(statusCode) {
+		return false, 0
+	}
+	return true, normalizeOpenAIStrictRetryCount(settings.retryCount)
+}
+
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
 	startTime := time.Now()
@@ -2392,10 +2450,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				})
 
 				s.handleFailoverSideEffects(ctx, resp, account)
+				retryableOnSameAccount, retryLimit := s.openAISameAccountRetryPolicy(ctx, account, resp.StatusCode, upstreamMsg, respBody, true)
 				return nil, &UpstreamFailoverError{
 					StatusCode:             resp.StatusCode,
 					ResponseBody:           respBody,
-					RetryableOnSameAccount: account.IsPoolMode() && (isPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody)),
+					RetryableOnSameAccount: retryableOnSameAccount,
+					SameAccountRetryLimit:  retryLimit,
 				}
 			}
 			return s.handleErrorResponse(ctx, resp, c, account, body)
@@ -3359,10 +3419,12 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		Detail:             upstreamDetail,
 	})
 	if shouldDisable {
+		retryableOnSameAccount, retryLimit := s.openAISameAccountRetryPolicy(c.Request.Context(), account, resp.StatusCode, upstreamMsg, body, false)
 		return nil, &UpstreamFailoverError{
 			StatusCode:             resp.StatusCode,
 			ResponseBody:           body,
-			RetryableOnSameAccount: account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
+			RetryableOnSameAccount: retryableOnSameAccount,
+			SameAccountRetryLimit:  retryLimit,
 		}
 	}
 
@@ -3496,10 +3558,12 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		Detail:             upstreamDetail,
 	})
 	if shouldDisable {
+		retryableOnSameAccount, retryLimit := s.openAISameAccountRetryPolicy(c.Request.Context(), account, resp.StatusCode, upstreamMsg, body, false)
 		return nil, &UpstreamFailoverError{
 			StatusCode:             resp.StatusCode,
 			ResponseBody:           body,
-			RetryableOnSameAccount: account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
+			RetryableOnSameAccount: retryableOnSameAccount,
+			SameAccountRetryLimit:  retryLimit,
 		}
 	}
 

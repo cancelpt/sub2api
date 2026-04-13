@@ -192,10 +192,12 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			if s.rateLimitService != nil {
 				s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 			}
+			retryableOnSameAccount, retryLimit := s.openAISameAccountRetryPolicy(ctx, account, resp.StatusCode, upstreamMsg, respBody, true)
 			return nil, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
-				RetryableOnSameAccount: account.IsPoolMode() && (isPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody)),
+				RetryableOnSameAccount: retryableOnSameAccount,
+				SameAccountRetryLimit:  retryLimit,
 			}
 		}
 		// Non-failover error: return Anthropic-formatted error to client

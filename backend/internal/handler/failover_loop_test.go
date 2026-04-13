@@ -362,6 +362,27 @@ func TestHandleFailoverError_SameAccountRetry(t *testing.T) {
 		require.Equal(t, FailoverContinue, action)
 		require.Len(t, mock.calls, 2, "第二次耗尽也应调用 TempUnschedule")
 	})
+
+	t.Run("显式重试上限覆盖默认值", func(t *testing.T) {
+		mock := &mockTempUnscheduler{}
+		fs := NewFailoverState(3, false)
+		limit := 1
+		err := &service.UpstreamFailoverError{
+			StatusCode:             500,
+			RetryableOnSameAccount: true,
+			SameAccountRetryLimit:  &limit,
+		}
+
+		action := fs.HandleFailoverError(context.Background(), mock, 100, "openai", err)
+		require.Equal(t, FailoverContinue, action)
+		require.Equal(t, 1, fs.SameAccountRetryCount[100])
+		require.Equal(t, 0, fs.SwitchCount)
+
+		action = fs.HandleFailoverError(context.Background(), mock, 100, "openai", err)
+		require.Equal(t, FailoverContinue, action)
+		require.Equal(t, 1, fs.SwitchCount, "超过显式上限后应立即切换账号")
+		require.Len(t, mock.calls, 1)
+	})
 }
 
 // ---------------------------------------------------------------------------

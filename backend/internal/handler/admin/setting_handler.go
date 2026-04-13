@@ -171,6 +171,8 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		MinClaudeCodeVersion:                 settings.MinClaudeCodeVersion,
 		MaxClaudeCodeVersion:                 settings.MaxClaudeCodeVersion,
 		OpenAIStrictSchedulerEnabled:         settings.OpenAIStrictSchedulerEnabled,
+		OpenAIStrictRetryEnabled:             settings.OpenAIStrictRetryEnabled,
+		OpenAIStrictRetryCount:               settings.OpenAIStrictRetryCount,
 		AllowUngroupedKeyScheduling:          settings.AllowUngroupedKeyScheduling,
 		BackendModeEnabled:                   settings.BackendModeEnabled,
 		EnableFingerprintUnification:         settings.EnableFingerprintUnification,
@@ -295,6 +297,8 @@ type UpdateSettingsRequest struct {
 	MaxClaudeCodeVersion string `json:"max_claude_code_version"`
 
 	OpenAIStrictSchedulerEnabled *bool `json:"openai_strict_scheduler_enabled"`
+	OpenAIStrictRetryEnabled     *bool `json:"openai_strict_retry_enabled"`
+	OpenAIStrictRetryCount       *int  `json:"openai_strict_retry_count"`
 
 	// 分组隔离
 	AllowUngroupedKeyScheduling bool `json:"allow_ungrouped_key_scheduling"`
@@ -368,6 +372,16 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		req.SMTPPort = 587
 	}
 	req.DefaultSubscriptions = normalizeDefaultSubscriptions(req.DefaultSubscriptions)
+	if req.OpenAIStrictRetryCount != nil {
+		switch {
+		case *req.OpenAIStrictRetryCount < 1:
+			value := 1
+			req.OpenAIStrictRetryCount = &value
+		case *req.OpenAIStrictRetryCount > 10:
+			value := 10
+			req.OpenAIStrictRetryCount = &value
+		}
+	}
 
 	// SMTP 配置保护：如果请求中 smtp_host 为空但数据库中已有配置，则保留已有 SMTP 配置
 	// 防止前端加载设置失败时空表单覆盖已保存的 SMTP 配置
@@ -846,6 +860,18 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.OpenAIStrictSchedulerEnabled
 		}(),
+		OpenAIStrictRetryEnabled: func() bool {
+			if req.OpenAIStrictRetryEnabled != nil {
+				return *req.OpenAIStrictRetryEnabled
+			}
+			return previousSettings.OpenAIStrictRetryEnabled
+		}(),
+		OpenAIStrictRetryCount: func() int {
+			if req.OpenAIStrictRetryCount != nil {
+				return *req.OpenAIStrictRetryCount
+			}
+			return previousSettings.OpenAIStrictRetryCount
+		}(),
 		AllowUngroupedKeyScheduling: req.AllowUngroupedKeyScheduling,
 		BackendModeEnabled:          req.BackendModeEnabled,
 		OpsMonitoringEnabled: func() bool {
@@ -1032,6 +1058,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		MinClaudeCodeVersion:                 updatedSettings.MinClaudeCodeVersion,
 		MaxClaudeCodeVersion:                 updatedSettings.MaxClaudeCodeVersion,
 		OpenAIStrictSchedulerEnabled:         updatedSettings.OpenAIStrictSchedulerEnabled,
+		OpenAIStrictRetryEnabled:             updatedSettings.OpenAIStrictRetryEnabled,
+		OpenAIStrictRetryCount:               updatedSettings.OpenAIStrictRetryCount,
 		AllowUngroupedKeyScheduling:          updatedSettings.AllowUngroupedKeyScheduling,
 		BackendModeEnabled:                   updatedSettings.BackendModeEnabled,
 		EnableFingerprintUnification:         updatedSettings.EnableFingerprintUnification,
@@ -1293,6 +1321,12 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.OpenAIStrictSchedulerEnabled != after.OpenAIStrictSchedulerEnabled {
 		changed = append(changed, "openai_strict_scheduler_enabled")
+	}
+	if before.OpenAIStrictRetryEnabled != after.OpenAIStrictRetryEnabled {
+		changed = append(changed, "openai_strict_retry_enabled")
+	}
+	if before.OpenAIStrictRetryCount != after.OpenAIStrictRetryCount {
+		changed = append(changed, "openai_strict_retry_count")
 	}
 	if before.AllowUngroupedKeyScheduling != after.AllowUngroupedKeyScheduling {
 		changed = append(changed, "allow_ungrouped_key_scheduling")

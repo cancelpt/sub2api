@@ -39,6 +39,16 @@ const (
 	singleAccountBackoffDelay = 2 * time.Second
 )
 
+func sameAccountRetryLimit(account *service.Account, failoverErr *service.UpstreamFailoverError) int {
+	if failoverErr != nil && failoverErr.SameAccountRetryLimit != nil {
+		return *failoverErr.SameAccountRetryLimit
+	}
+	if account != nil && account.IsPoolMode() {
+		return account.GetPoolModeRetryCount()
+	}
+	return maxSameAccountRetries
+}
+
 // FailoverState 跨循环迭代共享的 failover 状态
 type FailoverState struct {
 	SwitchCount           int
@@ -77,13 +87,17 @@ func (s *FailoverState) HandleFailoverError(
 	}
 
 	// 同账号重试：对 RetryableOnSameAccount 的临时性错误，先在同一账号上重试
-	if failoverErr.RetryableOnSameAccount && s.SameAccountRetryCount[accountID] < maxSameAccountRetries {
+	retryLimit := sameAccountRetryLimit(nil, failoverErr)
+	if retryLimit < 0 {
+		retryLimit = 0
+	}
+	if failoverErr.RetryableOnSameAccount && s.SameAccountRetryCount[accountID] < retryLimit {
 		s.SameAccountRetryCount[accountID]++
 		logger.FromContext(ctx).Warn("gateway.failover_same_account_retry",
 			zap.Int64("account_id", accountID),
 			zap.Int("upstream_status", failoverErr.StatusCode),
 			zap.Int("same_account_retry_count", s.SameAccountRetryCount[accountID]),
-			zap.Int("same_account_retry_max", maxSameAccountRetries),
+			zap.Int("same_account_retry_max", retryLimit),
 		)
 		if !sleepWithContext(ctx, sameAccountRetryDelay) {
 			return FailoverCanceled

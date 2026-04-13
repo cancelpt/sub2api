@@ -241,6 +241,10 @@ const (
 
 	// SettingKeyOpenAIStrictSchedulerEnabled 是否启用 OpenAI 严格主优先回切调度（默认 false => weighted_topk）
 	SettingKeyOpenAIStrictSchedulerEnabled = "openai_strict_scheduler_enabled"
+	// SettingKeyOpenAIStrictRetryEnabled 是否启用 OpenAI strict 模式下的同账号重试
+	SettingKeyOpenAIStrictRetryEnabled = "openai_strict_retry_enabled"
+	// SettingKeyOpenAIStrictRetryCount OpenAI strict 模式下的同账号重试次数
+	SettingKeyOpenAIStrictRetryCount = "openai_strict_retry_count"
 
 	// SettingKeyBackendModeEnabled Backend 模式：禁用用户注册和自助服务，仅管理员可登录
 	SettingKeyBackendModeEnabled = "backend_mode_enabled"

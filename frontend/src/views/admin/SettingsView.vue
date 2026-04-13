@@ -1655,6 +1655,42 @@
               <Toggle v-model="form.openai_strict_scheduler_enabled" />
             </div>
 
+            <div class="rounded-lg border border-gray-200 bg-gray-50/80 p-4 dark:border-dark-600 dark:bg-dark-800/60">
+              <div class="flex items-center justify-between">
+                <div>
+                  <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t('admin.settings.scheduling.openaiStrictRetryEnabled') }}
+                  </label>
+                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t('admin.settings.scheduling.openaiStrictRetryEnabledHint') }}
+                  </p>
+                </div>
+                <Toggle
+                  v-model="form.openai_strict_retry_enabled"
+                  :disabled="!form.openai_strict_scheduler_enabled"
+                />
+              </div>
+
+              <div class="mt-4">
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.scheduling.openaiStrictRetryCount') }}
+                </label>
+                <input
+                  v-model.number="form.openai_strict_retry_count"
+                  type="number"
+                  min="1"
+                  max="10"
+                  class="input mt-2 max-w-24"
+                  :disabled="
+                    !form.openai_strict_scheduler_enabled || !form.openai_strict_retry_enabled
+                  "
+                />
+                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.scheduling.openaiStrictRetryCountHint') }}
+                </p>
+              </div>
+            </div>
+
             <div class="flex items-center justify-between">
               <div>
                 <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -2751,6 +2787,8 @@ const form = reactive<SettingsForm>({
   min_claude_code_version: '',
   max_claude_code_version: '',
   openai_strict_scheduler_enabled: false,
+  openai_strict_retry_enabled: false,
+  openai_strict_retry_count: 3,
   // 分组隔离
   allow_ungrouped_key_scheduling: false,
   // Gateway forwarding behavior
@@ -3040,6 +3078,10 @@ async function saveSettings() {
 
     form.table_default_page_size = normalizedTableDefaultPageSize
     form.table_page_size_options = normalizedTablePageSizeOptions
+    form.openai_strict_retry_count = Math.min(
+      10,
+      Math.max(1, Math.floor(Number(form.openai_strict_retry_count) || 3))
+    )
 
     const normalizedDefaultSubscriptions = form.default_subscriptions
       .filter((item) => item.group_id > 0 && item.validity_days > 0)
@@ -3152,6 +3194,8 @@ async function saveSettings() {
       min_claude_code_version: form.min_claude_code_version,
       max_claude_code_version: form.max_claude_code_version,
       openai_strict_scheduler_enabled: form.openai_strict_scheduler_enabled,
+      openai_strict_retry_enabled: form.openai_strict_retry_enabled,
+      openai_strict_retry_count: form.openai_strict_retry_count,
       allow_ungrouped_key_scheduling: form.allow_ungrouped_key_scheduling,
       enable_fingerprint_unification: form.enable_fingerprint_unification,
       enable_metadata_passthrough: form.enable_metadata_passthrough,

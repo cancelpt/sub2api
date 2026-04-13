@@ -114,6 +114,8 @@ type SystemSettings struct {
 	MaxClaudeCodeVersion string `json:"max_claude_code_version"`
 
 	OpenAIStrictSchedulerEnabled bool `json:"openai_strict_scheduler_enabled"`
+	OpenAIStrictRetryEnabled     bool `json:"openai_strict_retry_enabled"`
+	OpenAIStrictRetryCount       int  `json:"openai_strict_retry_count"`
 
 	// 分组隔离
 	AllowUngroupedKeyScheduling bool `json:"allow_ungrouped_key_scheduling"`

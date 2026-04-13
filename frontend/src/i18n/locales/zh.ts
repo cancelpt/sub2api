@@ -4510,6 +4510,12 @@ export default {
         openaiStrictScheduler: 'OpenAI 严格主优先回切',
         openaiStrictSchedulerHint:
           '开启后，新的 OpenAI 请求会优先尝试更高优先级账号，只有主账号不可调度时才回落；关闭后恢复 weighted_topk。已有的 previous_response_id 和 session_hash 粘性路由不受影响。',
+        openaiStrictRetryEnabled: 'Strict 同账号重试',
+        openaiStrictRetryEnabledHint:
+          '仅在开启 OpenAI 严格主优先回切时生效。遇到未命中账号 custom_error_codes 的可切换上游错误时，先在当前账号内重试，再决定是否切到备账号。',
+        openaiStrictRetryCount: 'Strict 重试次数',
+        openaiStrictRetryCountHint:
+          '同账号重试的最大次数，范围 1-10。达到次数后才会进入严格调度的 failover 逻辑。',
         allowUngroupedKey: '允许未分组 Key 调度',
         allowUngroupedKeyHint: '关闭后，未分配到任何分组的 API Key 将无法发起请求（返回 403）。建议保持关闭以确保所有 Key 都归属明确的分组。'
       },

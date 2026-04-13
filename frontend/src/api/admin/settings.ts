@@ -107,6 +107,8 @@ export interface SystemSettings {
   min_claude_code_version: string
   max_claude_code_version: string
   openai_strict_scheduler_enabled: boolean
+  openai_strict_retry_enabled: boolean
+  openai_strict_retry_count: number
 
   // 分组隔离
   allow_ungrouped_key_scheduling: boolean
@@ -212,6 +214,8 @@ export interface UpdateSettingsRequest {
   min_claude_code_version?: string
   max_claude_code_version?: string
   openai_strict_scheduler_enabled?: boolean
+  openai_strict_retry_enabled?: boolean
+  openai_strict_retry_count?: number
   allow_ungrouped_key_scheduling?: boolean
   enable_fingerprint_unification?: boolean
   enable_metadata_passthrough?: boolean
