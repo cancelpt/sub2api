@@ -240,6 +240,7 @@ func ProvideOpenAIGatewayService(
 	openAITokenProvider *OpenAITokenProvider,
 	resolver *ModelPricingResolver,
 	channelService *ChannelService,
+	balanceNotifyService *BalanceNotifyService,
 	settingService *SettingService,
 ) *OpenAIGatewayService {
 	svc := NewOpenAIGatewayService(
@@ -261,6 +262,7 @@ func ProvideOpenAIGatewayService(
 		openAITokenProvider,
 		resolver,
 		channelService,
+		balanceNotifyService,
 	)
 	svc.SetSettingService(settingService)
 	return svc

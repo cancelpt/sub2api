@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
@@ -144,4 +145,55 @@ func TestAccountTestService_OpenAI429PersistsSnapshotAndRateLimit(t *testing.T) 
 	if account.RateLimitResetAt != nil && repo.rateLimitedAt != nil {
 		require.WithinDuration(t, *repo.rateLimitedAt, *account.RateLimitResetAt, time.Second)
 	}
+}
+
+func TestAccountTestService_ProcessOpenAIStream_EmptyStreamReturnsError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, recorder := newTestContext()
+	svc := &AccountTestService{}
+
+	err := svc.processOpenAIStream(ctx, strings.NewReader(""))
+	require.Error(t, err)
+	require.Contains(t, recorder.Body.String(), `"type":"error"`)
+	require.NotContains(t, recorder.Body.String(), `"type":"test_complete"`)
+}
+
+func TestAccountTestService_ProcessOpenAIStream_DeltaWithoutCompletionReturnsError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, recorder := newTestContext()
+	svc := &AccountTestService{}
+
+	err := svc.processOpenAIStream(ctx, strings.NewReader(`data: {"type":"response.output_text.delta","delta":"hi"}`))
+	require.Error(t, err)
+	require.Contains(t, recorder.Body.String(), `"type":"error"`)
+	require.NotContains(t, recorder.Body.String(), `"type":"test_complete"`)
+}
+
+func TestAccountTestService_OpenAIAPIKeyDefaultBaseURLUsesV1Responses(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := newTestContext()
+
+	resp := newJSONResponse(http.StatusOK, "")
+	resp.Body = io.NopCloser(strings.NewReader(`data: {"type":"response.completed"}` + "\n\n"))
+
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
+	svc := &AccountTestService{
+		httpUpstream: upstream,
+		cfg:          &config.Config{},
+	}
+	account := &Account{
+		ID:          1001,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "test-key",
+			"base_url": "https://api.openai.com",
+		},
+	}
+
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4")
+	require.NoError(t, err)
+	require.Len(t, upstream.requests, 1)
+	require.Equal(t, "https://api.openai.com/v1/responses", upstream.requests[0].URL.String())
 }

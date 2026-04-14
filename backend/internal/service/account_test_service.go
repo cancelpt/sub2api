@@ -457,14 +457,14 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		if baseURL == "" {
 			baseURL = "https://api.openai.com"
 		}
-		normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
-		if err != nil {
-			return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid base URL: %s", err.Error()))
+			normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
+			if err != nil {
+				return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid base URL: %s", err.Error()))
+			}
+			apiURL = buildOpenAIResponsesURL(normalizedBaseURL)
+		} else {
+			return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported account type: %s", account.Type))
 		}
-		apiURL = strings.TrimSuffix(normalizedBaseURL, "/") + "/responses"
-	} else {
-		return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported account type: %s", account.Type))
-	}
 
 	// Set SSE headers
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
@@ -990,16 +990,15 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 
 	for {
 		line, err := reader.ReadString('\n')
-		if err != nil {
-			if err == io.EOF {
-				s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
-				return nil
-			}
+		if err != nil && !errors.Is(err, io.EOF) {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Stream read error: %s", err.Error()))
 		}
 
 		line = strings.TrimSpace(line)
 		if line == "" || !sseDataPrefix.MatchString(line) {
+			if errors.Is(err, io.EOF) {
+				return s.sendErrorAndEnd(c, "Stream ended before completion event")
+			}
 			continue
 		}
 
@@ -1022,9 +1021,11 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 			if delta, ok := data["delta"].(string); ok && delta != "" {
 				s.sendEvent(c, TestEvent{Type: "content", Text: delta})
 			}
-		case "response.completed":
+		case "response.completed", "response.done":
 			s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 			return nil
+		case "response.failed":
+			return s.sendErrorAndEnd(c, "Upstream response failed")
 		case "error":
 			errorMsg := "Unknown error"
 			if errData, ok := data["error"].(map[string]any); ok {
@@ -1033,6 +1034,10 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 				}
 			}
 			return s.sendErrorAndEnd(c, errorMsg)
+		}
+
+		if errors.Is(err, io.EOF) {
+			return s.sendErrorAndEnd(c, "Stream ended before completion event")
 		}
 	}
 }
