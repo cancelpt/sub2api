@@ -4354,6 +4354,9 @@ export default {
         openaiStrictRetryCount: 'Strict Retry Count',
         openaiStrictRetryCountHint:
           'Maximum same-account retries before strict failover proceeds. Allowed range: 1-10.',
+        openaiStrictRetryDelayMs: 'Strict Retry Delay (ms)',
+        openaiStrictRetryDelayMsHint:
+          'Wait time before the next same-account retry (ms) when strict retry is enabled.',
         allowUngroupedKey: 'Allow Ungrouped Key Scheduling',
         allowUngroupedKeyHint: 'When disabled, API Keys not assigned to any group cannot make requests (403 Forbidden). Keep disabled to ensure all Keys belong to a specific group.'
       },

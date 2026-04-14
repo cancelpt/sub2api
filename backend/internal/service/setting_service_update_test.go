@@ -5,7 +5,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"reflect"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -241,13 +240,15 @@ func TestSettingService_UpdateSettings_PersistsOpenAIStrictRetrySettings(t *test
 	svc := NewSettingService(repo, &config.Config{})
 	settings := &SystemSettings{
 		OpenAIStrictSchedulerEnabled: true,
+		OpenAIStrictRetryEnabled:     true,
+		OpenAIStrictRetryCount:       5,
+		OpenAIStrictRetryDelayMs:     3000,
 	}
-	reflect.ValueOf(settings).Elem().FieldByName("OpenAIStrictRetryEnabled").SetBool(true)
-	reflect.ValueOf(settings).Elem().FieldByName("OpenAIStrictRetryCount").SetInt(5)
 
 	err := svc.UpdateSettings(context.Background(), settings)
 	require.NoError(t, err)
 	require.Equal(t, "true", repo.updates[SettingKeyOpenAIStrictSchedulerEnabled])
 	require.Equal(t, "true", repo.updates["openai_strict_retry_enabled"])
 	require.Equal(t, "5", repo.updates["openai_strict_retry_count"])
+	require.Equal(t, "3000", repo.updates["openai_strict_retry_delay_ms"])
 }

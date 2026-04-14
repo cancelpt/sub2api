@@ -1808,6 +1808,10 @@ func retryLimitPtr(v int) *int {
 	return &v
 }
 
+func retryDelayPtr(v time.Duration) *time.Duration {
+	return &v
+}
+
 func (s *OpenAIGatewayService) openAISameAccountRetryPolicy(
 	ctx context.Context,
 	account *Account,
@@ -1815,9 +1819,9 @@ func (s *OpenAIGatewayService) openAISameAccountRetryPolicy(
 	upstreamMsg string,
 	upstreamBody []byte,
 	includeTransient bool,
-) (bool, *int) {
+) (bool, *int, *time.Duration) {
 	if account == nil {
-		return false, nil
+		return false, nil, nil
 	}
 
 	poolRetryable := account.IsPoolMode() && isPoolModeRetryableStatus(statusCode)
@@ -1826,23 +1830,23 @@ func (s *OpenAIGatewayService) openAISameAccountRetryPolicy(
 	}
 	if poolRetryable {
 		retryLimit := account.GetPoolModeRetryCount()
-		return true, retryLimitPtr(retryLimit)
+		return true, retryLimitPtr(retryLimit), nil
 	}
 
-	retryEnabled, retryLimit := s.openAIStrictSameAccountRetryPolicy(ctx, account, statusCode)
+	retryEnabled, retryLimit, retryDelay := s.openAIStrictSameAccountRetryPolicy(ctx, account, statusCode)
 	if retryEnabled {
-		return true, retryLimitPtr(retryLimit)
+		return true, retryLimitPtr(retryLimit), retryDelayPtr(retryDelay)
 	}
-	return false, nil
+	return false, nil, nil
 }
 
 func (s *OpenAIGatewayService) openAIStrictSameAccountRetryPolicy(
 	ctx context.Context,
 	account *Account,
 	statusCode int,
-) (bool, int) {
+) (bool, int, time.Duration) {
 	if s == nil || s.settingService == nil || account == nil {
-		return false, 0
+		return false, 0, 0
 	}
 
 	settings := s.settingService.openAIStrictSchedulerSettings(ctx)
@@ -1854,12 +1858,12 @@ func (s *OpenAIGatewayService) openAIStrictSameAccountRetryPolicy(
 		strictEnabled = s.settingService.defaultOpenAIStrictSchedulerEnabled()
 	}
 	if !strictEnabled || !settings.retryEnabled {
-		return false, 0
+		return false, 0, 0
 	}
 	if account.ShouldHandleErrorCode(statusCode) {
-		return false, 0
+		return false, 0, 0
 	}
-	return true, normalizeOpenAIStrictRetryCount(settings.retryCount)
+	return true, normalizeOpenAIStrictRetryCount(settings.retryCount), time.Duration(normalizeOpenAIStrictRetryDelayMs(settings.retryDelayMs)) * time.Millisecond
 }
 
 // Forward forwards request to OpenAI API
@@ -2450,12 +2454,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				})
 
 				s.handleFailoverSideEffects(ctx, resp, account)
-				retryableOnSameAccount, retryLimit := s.openAISameAccountRetryPolicy(ctx, account, resp.StatusCode, upstreamMsg, respBody, true)
+				retryableOnSameAccount, retryLimit, retryDelay := s.openAISameAccountRetryPolicy(ctx, account, resp.StatusCode, upstreamMsg, respBody, true)
 				return nil, &UpstreamFailoverError{
 					StatusCode:             resp.StatusCode,
 					ResponseBody:           respBody,
 					RetryableOnSameAccount: retryableOnSameAccount,
 					SameAccountRetryLimit:  retryLimit,
+					SameAccountRetryDelay:  retryDelay,
 				}
 			}
 			return s.handleErrorResponse(ctx, resp, c, account, body)
@@ -3419,12 +3424,13 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		Detail:             upstreamDetail,
 	})
 	if shouldDisable {
-		retryableOnSameAccount, retryLimit := s.openAISameAccountRetryPolicy(c.Request.Context(), account, resp.StatusCode, upstreamMsg, body, false)
+		retryableOnSameAccount, retryLimit, retryDelay := s.openAISameAccountRetryPolicy(c.Request.Context(), account, resp.StatusCode, upstreamMsg, body, false)
 		return nil, &UpstreamFailoverError{
 			StatusCode:             resp.StatusCode,
 			ResponseBody:           body,
 			RetryableOnSameAccount: retryableOnSameAccount,
 			SameAccountRetryLimit:  retryLimit,
+			SameAccountRetryDelay:  retryDelay,
 		}
 	}
 
@@ -3558,12 +3564,13 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		Detail:             upstreamDetail,
 	})
 	if shouldDisable {
-		retryableOnSameAccount, retryLimit := s.openAISameAccountRetryPolicy(c.Request.Context(), account, resp.StatusCode, upstreamMsg, body, false)
+		retryableOnSameAccount, retryLimit, retryDelay := s.openAISameAccountRetryPolicy(c.Request.Context(), account, resp.StatusCode, upstreamMsg, body, false)
 		return nil, &UpstreamFailoverError{
 			StatusCode:             resp.StatusCode,
 			ResponseBody:           body,
 			RetryableOnSameAccount: retryableOnSameAccount,
 			SameAccountRetryLimit:  retryLimit,
+			SameAccountRetryDelay:  retryDelay,
 		}
 	}
 

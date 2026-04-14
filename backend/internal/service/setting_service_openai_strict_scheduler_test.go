@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
@@ -82,4 +83,25 @@ func TestSettingService_GetAllSettings_ExplicitOpenAIStrictSchedulerOverridesCon
 	settings, err := svc.GetAllSettings(context.Background())
 	require.NoError(t, err)
 	require.False(t, settings.OpenAIStrictSchedulerEnabled)
+}
+
+func TestSettingService_GetOpenAIStrictRetryDelay_DefaultAndExplicitValue(t *testing.T) {
+	resetOpenAIStrictSchedulerTestCache(t)
+
+	svc := NewSettingService(&strictSchedulerSettingsRepoStub{
+		all: map[string]string{
+			SettingKeyRegistrationEnabled: "true",
+		},
+	}, &config.Config{})
+	require.Equal(t, 500*time.Millisecond, svc.GetOpenAIStrictRetryDelay(context.Background()))
+
+	resetOpenAIStrictSchedulerTestCache(t)
+	svc = NewSettingService(&strictSchedulerSettingsRepoStub{
+		all: map[string]string{
+			SettingKeyRegistrationEnabled:          "true",
+			SettingKeyOpenAIStrictSchedulerEnabled: "true",
+			SettingKeyOpenAIStrictRetryDelayMs:     "3000",
+		},
+	}, &config.Config{})
+	require.Equal(t, 3*time.Second, svc.GetOpenAIStrictRetryDelay(context.Background()))
 }

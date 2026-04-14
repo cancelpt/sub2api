@@ -85,6 +85,7 @@ type cachedOpenAIStrictScheduler struct {
 	enabled      bool
 	retryEnabled bool
 	retryCount   int
+	retryDelayMs int
 	expiresAt    int64 // unix nano
 }
 
@@ -98,6 +99,8 @@ const openAIStrictSchedulerDBTimeout = 5 * time.Second
 const (
 	defaultOpenAIStrictRetryCount = 3
 	maxOpenAIStrictRetryCount     = 10
+	defaultOpenAIStrictRetryDelay = 500
+	maxOpenAIStrictRetryDelay     = 60000
 )
 
 type openAIStrictSchedulerState uint8
@@ -617,6 +620,7 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 	updates[SettingKeyOpenAIStrictSchedulerEnabled] = strconv.FormatBool(settings.OpenAIStrictSchedulerEnabled)
 	updates[SettingKeyOpenAIStrictRetryEnabled] = strconv.FormatBool(settings.OpenAIStrictRetryEnabled)
 	updates[SettingKeyOpenAIStrictRetryCount] = strconv.Itoa(normalizeOpenAIStrictRetryCount(settings.OpenAIStrictRetryCount))
+	updates[SettingKeyOpenAIStrictRetryDelayMs] = strconv.Itoa(normalizeOpenAIStrictRetryDelayMs(settings.OpenAIStrictRetryDelayMs))
 
 	// 分组隔离
 	updates[SettingKeyAllowUngroupedKeyScheduling] = strconv.FormatBool(settings.AllowUngroupedKeyScheduling)
@@ -649,6 +653,7 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 			enabled:      settings.OpenAIStrictSchedulerEnabled,
 			retryEnabled: settings.OpenAIStrictRetryEnabled,
 			retryCount:   normalizeOpenAIStrictRetryCount(settings.OpenAIStrictRetryCount),
+			retryDelayMs: normalizeOpenAIStrictRetryDelayMs(settings.OpenAIStrictRetryDelayMs),
 			expiresAt:    time.Now().Add(openAIStrictSchedulerCacheTTL).UnixNano(),
 		})
 		gatewayForwardingSF.Forget("gateway_forwarding")
@@ -979,6 +984,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOpenAIStrictSchedulerEnabled: "false",
 		SettingKeyOpenAIStrictRetryEnabled:     "false",
 		SettingKeyOpenAIStrictRetryCount:       strconv.Itoa(defaultOpenAIStrictRetryCount),
+		SettingKeyOpenAIStrictRetryDelayMs:     strconv.Itoa(defaultOpenAIStrictRetryDelay),
 
 		// 分组隔离（默认不允许未分组 Key 调度）
 		SettingKeyAllowUngroupedKeyScheduling: "false",
@@ -1260,6 +1266,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	}
 	result.OpenAIStrictRetryEnabled = settings[SettingKeyOpenAIStrictRetryEnabled] == "true"
 	result.OpenAIStrictRetryCount = parseOpenAIStrictRetryCount(settings[SettingKeyOpenAIStrictRetryCount])
+	result.OpenAIStrictRetryDelayMs = parseOpenAIStrictRetryDelayMs(settings[SettingKeyOpenAIStrictRetryDelayMs])
 
 	// 分组隔离
 	result.AllowUngroupedKeyScheduling = settings[SettingKeyAllowUngroupedKeyScheduling] == "true"
@@ -1992,6 +1999,11 @@ func (s *SettingService) GetOpenAIStrictRetryCount(ctx context.Context) int {
 	return normalizeOpenAIStrictRetryCount(settings.retryCount)
 }
 
+func (s *SettingService) GetOpenAIStrictRetryDelay(ctx context.Context) time.Duration {
+	settings := s.openAIStrictSchedulerSettings(ctx)
+	return time.Duration(normalizeOpenAIStrictRetryDelayMs(settings.retryDelayMs)) * time.Millisecond
+}
+
 func (s *SettingService) defaultOpenAIStrictSchedulerEnabled() bool {
 	return s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.SchedulerMode == "strict_priority_fallback"
 }
@@ -2004,8 +2016,9 @@ func (s *SettingService) openAIStrictSchedulerSetting(ctx context.Context) (bool
 func (s *SettingService) openAIStrictSchedulerSettings(ctx context.Context) cachedOpenAIStrictScheduler {
 	if s == nil || s.settingRepo == nil {
 		return cachedOpenAIStrictScheduler{
-			state:      openAIStrictSchedulerStateUnavailable,
-			retryCount: defaultOpenAIStrictRetryCount,
+			state:        openAIStrictSchedulerStateUnavailable,
+			retryCount:   defaultOpenAIStrictRetryCount,
+			retryDelayMs: defaultOpenAIStrictRetryDelay,
 		}
 	}
 	if ctx == nil {
@@ -2034,6 +2047,7 @@ func (s *SettingService) openAIStrictSchedulerSettings(ctx context.Context) cach
 					enabled:      false,
 					retryEnabled: false,
 					retryCount:   defaultOpenAIStrictRetryCount,
+					retryDelayMs: defaultOpenAIStrictRetryDelay,
 					expiresAt:    time.Now().Add(openAIStrictSchedulerCacheTTL).UnixNano(),
 				}
 				openAIStrictSchedulerCache.Store(cached)
@@ -2045,6 +2059,7 @@ func (s *SettingService) openAIStrictSchedulerSettings(ctx context.Context) cach
 				enabled:      false,
 				retryEnabled: false,
 				retryCount:   defaultOpenAIStrictRetryCount,
+				retryDelayMs: defaultOpenAIStrictRetryDelay,
 				expiresAt:    time.Now().Add(openAIStrictSchedulerErrorTTL).UnixNano(),
 			}
 			openAIStrictSchedulerCache.Store(cached)
@@ -2064,11 +2079,18 @@ func (s *SettingService) openAIStrictSchedulerSettings(ctx context.Context) cach
 		} else if err != nil && !errors.Is(err, ErrSettingNotFound) {
 			slog.Warn("failed to get openai strict retry count", "error", err)
 		}
+		retryDelayMs := defaultOpenAIStrictRetryDelay
+		if value, err := s.settingRepo.GetValue(dbCtx, SettingKeyOpenAIStrictRetryDelayMs); err == nil {
+			retryDelayMs = parseOpenAIStrictRetryDelayMs(value)
+		} else if err != nil && !errors.Is(err, ErrSettingNotFound) {
+			slog.Warn("failed to get openai strict retry delay setting", "error", err)
+		}
 		cached := &cachedOpenAIStrictScheduler{
 			state:        openAIStrictSchedulerStatePresent,
 			enabled:      enabled,
 			retryEnabled: retryEnabled,
 			retryCount:   retryCount,
+			retryDelayMs: retryDelayMs,
 			expiresAt:    time.Now().Add(openAIStrictSchedulerCacheTTL).UnixNano(),
 		}
 		openAIStrictSchedulerCache.Store(cached)
@@ -2078,8 +2100,9 @@ func (s *SettingService) openAIStrictSchedulerSettings(ctx context.Context) cach
 		return *cached
 	}
 	return cachedOpenAIStrictScheduler{
-		state:      openAIStrictSchedulerStateUnavailable,
-		retryCount: defaultOpenAIStrictRetryCount,
+		state:        openAIStrictSchedulerStateUnavailable,
+		retryCount:   defaultOpenAIStrictRetryCount,
+		retryDelayMs: defaultOpenAIStrictRetryDelay,
 	}
 }
 
@@ -2103,6 +2126,28 @@ func normalizeOpenAIStrictRetryCount(count int) int {
 		return maxOpenAIStrictRetryCount
 	}
 	return count
+}
+
+func parseOpenAIStrictRetryDelayMs(value string) int {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return defaultOpenAIStrictRetryDelay
+	}
+	delay, err := strconv.Atoi(value)
+	if err != nil {
+		return defaultOpenAIStrictRetryDelay
+	}
+	return normalizeOpenAIStrictRetryDelayMs(delay)
+}
+
+func normalizeOpenAIStrictRetryDelayMs(delay int) int {
+	if delay < 0 {
+		return 0
+	}
+	if delay > maxOpenAIStrictRetryDelay {
+		return maxOpenAIStrictRetryDelay
+	}
+	return delay
 }
 
 // GetClaudeCodeVersionBounds 获取 Claude Code 版本号上下限要求

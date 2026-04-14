@@ -173,6 +173,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		OpenAIStrictSchedulerEnabled:         settings.OpenAIStrictSchedulerEnabled,
 		OpenAIStrictRetryEnabled:             settings.OpenAIStrictRetryEnabled,
 		OpenAIStrictRetryCount:               settings.OpenAIStrictRetryCount,
+		OpenAIStrictRetryDelayMs:             settings.OpenAIStrictRetryDelayMs,
 		AllowUngroupedKeyScheduling:          settings.AllowUngroupedKeyScheduling,
 		BackendModeEnabled:                   settings.BackendModeEnabled,
 		EnableFingerprintUnification:         settings.EnableFingerprintUnification,
@@ -299,6 +300,7 @@ type UpdateSettingsRequest struct {
 	OpenAIStrictSchedulerEnabled *bool `json:"openai_strict_scheduler_enabled"`
 	OpenAIStrictRetryEnabled     *bool `json:"openai_strict_retry_enabled"`
 	OpenAIStrictRetryCount       *int  `json:"openai_strict_retry_count"`
+	OpenAIStrictRetryDelayMs     *int  `json:"openai_strict_retry_delay_ms"`
 
 	// 分组隔离
 	AllowUngroupedKeyScheduling bool `json:"allow_ungrouped_key_scheduling"`
@@ -380,6 +382,16 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		case *req.OpenAIStrictRetryCount > 10:
 			value := 10
 			req.OpenAIStrictRetryCount = &value
+		}
+	}
+	if req.OpenAIStrictRetryDelayMs != nil {
+		switch {
+		case *req.OpenAIStrictRetryDelayMs < 0:
+			value := 0
+			req.OpenAIStrictRetryDelayMs = &value
+		case *req.OpenAIStrictRetryDelayMs > 60000:
+			value := 60000
+			req.OpenAIStrictRetryDelayMs = &value
 		}
 	}
 
@@ -872,6 +884,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.OpenAIStrictRetryCount
 		}(),
+		OpenAIStrictRetryDelayMs: func() int {
+			if req.OpenAIStrictRetryDelayMs != nil {
+				return *req.OpenAIStrictRetryDelayMs
+			}
+			return previousSettings.OpenAIStrictRetryDelayMs
+		}(),
 		AllowUngroupedKeyScheduling: req.AllowUngroupedKeyScheduling,
 		BackendModeEnabled:          req.BackendModeEnabled,
 		OpsMonitoringEnabled: func() bool {
@@ -1060,6 +1078,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		OpenAIStrictSchedulerEnabled:         updatedSettings.OpenAIStrictSchedulerEnabled,
 		OpenAIStrictRetryEnabled:             updatedSettings.OpenAIStrictRetryEnabled,
 		OpenAIStrictRetryCount:               updatedSettings.OpenAIStrictRetryCount,
+		OpenAIStrictRetryDelayMs:             updatedSettings.OpenAIStrictRetryDelayMs,
 		AllowUngroupedKeyScheduling:          updatedSettings.AllowUngroupedKeyScheduling,
 		BackendModeEnabled:                   updatedSettings.BackendModeEnabled,
 		EnableFingerprintUnification:         updatedSettings.EnableFingerprintUnification,
@@ -1327,6 +1346,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.OpenAIStrictRetryCount != after.OpenAIStrictRetryCount {
 		changed = append(changed, "openai_strict_retry_count")
+	}
+	if before.OpenAIStrictRetryDelayMs != after.OpenAIStrictRetryDelayMs {
+		changed = append(changed, "openai_strict_retry_delay_ms")
 	}
 	if before.AllowUngroupedKeyScheduling != after.AllowUngroupedKeyScheduling {
 		changed = append(changed, "allow_ungrouped_key_scheduling")

@@ -1689,6 +1689,25 @@
                   {{ t('admin.settings.scheduling.openaiStrictRetryCountHint') }}
                 </p>
               </div>
+
+              <div class="mt-4">
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.scheduling.openaiStrictRetryDelayMs') }}
+                </label>
+                <input
+                  v-model.number="form.openai_strict_retry_delay_ms"
+                  type="number"
+                  min="0"
+                  max="60000"
+                  class="input mt-2 max-w-24"
+                  :disabled="
+                    !form.openai_strict_scheduler_enabled || !form.openai_strict_retry_enabled
+                  "
+                />
+                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.scheduling.openaiStrictRetryDelayMsHint') }}
+                </p>
+              </div>
             </div>
 
             <div class="flex items-center justify-between">
@@ -2789,6 +2808,7 @@ const form = reactive<SettingsForm>({
   openai_strict_scheduler_enabled: false,
   openai_strict_retry_enabled: false,
   openai_strict_retry_count: 3,
+  openai_strict_retry_delay_ms: 500,
   // 分组隔离
   allow_ungrouped_key_scheduling: false,
   // Gateway forwarding behavior
@@ -3082,6 +3102,10 @@ async function saveSettings() {
       10,
       Math.max(1, Math.floor(Number(form.openai_strict_retry_count) || 3))
     )
+    form.openai_strict_retry_delay_ms = Math.min(
+      60000,
+      Math.max(0, Math.floor(Number(form.openai_strict_retry_delay_ms) || 500))
+    )
 
     const normalizedDefaultSubscriptions = form.default_subscriptions
       .filter((item) => item.group_id > 0 && item.validity_days > 0)
@@ -3196,6 +3220,7 @@ async function saveSettings() {
       openai_strict_scheduler_enabled: form.openai_strict_scheduler_enabled,
       openai_strict_retry_enabled: form.openai_strict_retry_enabled,
       openai_strict_retry_count: form.openai_strict_retry_count,
+      openai_strict_retry_delay_ms: form.openai_strict_retry_delay_ms,
       allow_ungrouped_key_scheduling: form.allow_ungrouped_key_scheduling,
       enable_fingerprint_unification: form.enable_fingerprint_unification,
       enable_metadata_passthrough: form.enable_metadata_passthrough,

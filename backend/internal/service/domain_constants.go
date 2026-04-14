@@ -245,6 +245,8 @@ const (
 	SettingKeyOpenAIStrictRetryEnabled = "openai_strict_retry_enabled"
 	// SettingKeyOpenAIStrictRetryCount OpenAI strict 模式下的同账号重试次数
 	SettingKeyOpenAIStrictRetryCount = "openai_strict_retry_count"
+	// SettingKeyOpenAIStrictRetryDelayMs OpenAI strict 模式下的同账号重试等待时间（毫秒）
+	SettingKeyOpenAIStrictRetryDelayMs = "openai_strict_retry_delay_ms"
 
 	// SettingKeyBackendModeEnabled Backend 模式：禁用用户注册和自助服务，仅管理员可登录
 	SettingKeyBackendModeEnabled = "backend_mode_enabled"

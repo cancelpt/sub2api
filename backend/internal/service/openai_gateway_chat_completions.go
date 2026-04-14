@@ -172,12 +172,13 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 			if s.rateLimitService != nil {
 				s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 			}
-			retryableOnSameAccount, retryLimit := s.openAISameAccountRetryPolicy(ctx, account, resp.StatusCode, upstreamMsg, respBody, true)
+			retryableOnSameAccount, retryLimit, retryDelay := s.openAISameAccountRetryPolicy(ctx, account, resp.StatusCode, upstreamMsg, respBody, true)
 			return nil, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
 				RetryableOnSameAccount: retryableOnSameAccount,
 				SameAccountRetryLimit:  retryLimit,
+				SameAccountRetryDelay:  retryDelay,
 			}
 		}
 		return s.handleChatCompletionsErrorResponse(resp, c, account)

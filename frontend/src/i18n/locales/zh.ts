@@ -4516,6 +4516,9 @@ export default {
         openaiStrictRetryCount: 'Strict 重试次数',
         openaiStrictRetryCountHint:
           '同账号重试的最大次数，范围 1-10。达到次数后才会进入严格调度的 failover 逻辑。',
+        openaiStrictRetryDelayMs: 'Strict 重试延迟（毫秒）',
+        openaiStrictRetryDelayMsHint:
+          '在严格同账号重试时，同账号下一次重试的等待时间（毫秒）。',
         allowUngroupedKey: '允许未分组 Key 调度',
         allowUngroupedKeyHint: '关闭后，未分配到任何分组的 API Key 将无法发起请求（返回 403）。建议保持关闭以确保所有 Key 都归属明确的分组。'
       },

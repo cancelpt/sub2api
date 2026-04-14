@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
@@ -35,6 +36,7 @@ func TestForwardAsAnthropic_StrictRetryMarksUnhandledCustomErrorsRetryableOnSame
 			SettingKeyOpenAIStrictSchedulerEnabled: "true",
 			"openai_strict_retry_enabled":          "true",
 			"openai_strict_retry_count":            "4",
+			"openai_strict_retry_delay_ms":         "3000",
 		},
 	}, &config.Config{})
 	svc := &OpenAIGatewayService{
@@ -59,6 +61,8 @@ func TestForwardAsAnthropic_StrictRetryMarksUnhandledCustomErrorsRetryableOnSame
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
 	require.True(t, failoverErr.RetryableOnSameAccount)
+	require.NotNil(t, failoverErr.SameAccountRetryDelay)
+	require.Equal(t, 3*time.Second, *failoverErr.SameAccountRetryDelay)
 }
 
 func TestForwardAsAnthropic_StrictRetrySkipsHandledCustomErrorCodes(t *testing.T) {

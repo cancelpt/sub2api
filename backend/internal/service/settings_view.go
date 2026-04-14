@@ -100,6 +100,7 @@ type SystemSettings struct {
 	OpenAIStrictSchedulerEnabled bool
 	OpenAIStrictRetryEnabled     bool
 	OpenAIStrictRetryCount       int
+	OpenAIStrictRetryDelayMs     int
 
 	// 分组隔离：允许未分组 Key 调度（默认 false → 403）
 	AllowUngroupedKeyScheduling bool

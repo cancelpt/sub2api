@@ -332,7 +332,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 						select {
 						case <-c.Request.Context().Done():
 							return
-						case <-time.After(sameAccountRetryDelay):
+						case <-time.After(sameAccountRetryDelayForFailoverErr(failoverErr)):
 						}
 						continue
 					}
@@ -711,7 +711,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 						select {
 						case <-c.Request.Context().Done():
 							return
-						case <-time.After(sameAccountRetryDelay):
+						case <-time.After(sameAccountRetryDelayForFailoverErr(failoverErr)):
 						}
 						continue
 					}

@@ -49,6 +49,13 @@ func sameAccountRetryLimit(account *service.Account, failoverErr *service.Upstre
 	return maxSameAccountRetries
 }
 
+func sameAccountRetryDelayForFailoverErr(failoverErr *service.UpstreamFailoverError) time.Duration {
+	if failoverErr != nil && failoverErr.SameAccountRetryDelay != nil {
+		return *failoverErr.SameAccountRetryDelay
+	}
+	return sameAccountRetryDelay
+}
+
 // FailoverState 跨循环迭代共享的 failover 状态
 type FailoverState struct {
 	SwitchCount           int
@@ -99,7 +106,7 @@ func (s *FailoverState) HandleFailoverError(
 			zap.Int("same_account_retry_count", s.SameAccountRetryCount[accountID]),
 			zap.Int("same_account_retry_max", retryLimit),
 		)
-		if !sleepWithContext(ctx, sameAccountRetryDelay) {
+		if !sleepWithContext(ctx, sameAccountRetryDelayForFailoverErr(failoverErr)) {
 			return FailoverCanceled
 		}
 		return FailoverContinue

@@ -116,6 +116,7 @@ type SystemSettings struct {
 	OpenAIStrictSchedulerEnabled bool `json:"openai_strict_scheduler_enabled"`
 	OpenAIStrictRetryEnabled     bool `json:"openai_strict_retry_enabled"`
 	OpenAIStrictRetryCount       int  `json:"openai_strict_retry_count"`
+	OpenAIStrictRetryDelayMs     int  `json:"openai_strict_retry_delay_ms"`
 
 	// 分组隔离
 	AllowUngroupedKeyScheduling bool `json:"allow_ungrouped_key_scheduling"`

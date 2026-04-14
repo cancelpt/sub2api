@@ -109,6 +109,7 @@ export interface SystemSettings {
   openai_strict_scheduler_enabled: boolean
   openai_strict_retry_enabled: boolean
   openai_strict_retry_count: number
+  openai_strict_retry_delay_ms: number
 
   // 分组隔离
   allow_ungrouped_key_scheduling: boolean
@@ -216,6 +217,7 @@ export interface UpdateSettingsRequest {
   openai_strict_scheduler_enabled?: boolean
   openai_strict_retry_enabled?: boolean
   openai_strict_retry_count?: number
+  openai_strict_retry_delay_ms?: number
   allow_ungrouped_key_scheduling?: boolean
   enable_fingerprint_unification?: boolean
   enable_metadata_passthrough?: boolean

@@ -109,6 +109,7 @@ func TestSettingHandler_UpdateSettings_PreservesOpenAIStrictRetrySettingsWhenFie
 			service.SettingKeyOpenAIStrictSchedulerEnabled: "true",
 			"openai_strict_retry_enabled":                  "true",
 			"openai_strict_retry_count":                    "4",
+			"openai_strict_retry_delay_ms":                 "3000",
 		},
 	}
 	settingService := service.NewSettingService(repo, &config.Config{})
@@ -126,6 +127,8 @@ func TestSettingHandler_UpdateSettings_PreservesOpenAIStrictRetrySettingsWhenFie
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	require.Equal(t, "true", repo.all["openai_strict_retry_enabled"])
 	require.Equal(t, "4", repo.all["openai_strict_retry_count"])
+	require.Equal(t, "3000", repo.all["openai_strict_retry_delay_ms"])
 	require.Contains(t, recorder.Body.String(), `"openai_strict_retry_enabled":true`)
 	require.Contains(t, recorder.Body.String(), `"openai_strict_retry_count":4`)
+	require.Contains(t, recorder.Body.String(), `"openai_strict_retry_delay_ms":3000`)
 }
