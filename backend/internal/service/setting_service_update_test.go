@@ -224,6 +224,25 @@ func TestSettingService_UpdateSettings_TablePreferences(t *testing.T) {
 	require.Equal(t, "[20,100]", repo.updates[SettingKeyTablePageSizeOptions])
 }
 
+func TestSettingService_UpdateSettings_PaymentVisibleMethodsAndAdvancedScheduler(t *testing.T) {
+	repo := &settingUpdateRepoStub{}
+	svc := NewSettingService(repo, &config.Config{})
+
+	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		PaymentVisibleMethodAlipaySource:  "alipay",
+		PaymentVisibleMethodWxpaySource:   "easypay",
+		PaymentVisibleMethodAlipayEnabled: true,
+		PaymentVisibleMethodWxpayEnabled:  false,
+		OpenAIAdvancedSchedulerEnabled:    true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, VisibleMethodSourceOfficialAlipay, repo.updates[SettingPaymentVisibleMethodAlipaySource])
+	require.Equal(t, VisibleMethodSourceEasyPayWechat, repo.updates[SettingPaymentVisibleMethodWxpaySource])
+	require.Equal(t, "true", repo.updates[SettingPaymentVisibleMethodAlipayEnabled])
+	require.Equal(t, "false", repo.updates[SettingPaymentVisibleMethodWxpayEnabled])
+	require.Equal(t, "true", repo.updates[openAIAdvancedSchedulerSettingKey])
+}
+
 func TestSettingService_UpdateSettings_PersistsOpenAIStrictSchedulerToggle(t *testing.T) {
 	repo := &settingUpdateRepoStub{}
 	svc := NewSettingService(repo, &config.Config{})
@@ -238,17 +257,28 @@ func TestSettingService_UpdateSettings_PersistsOpenAIStrictSchedulerToggle(t *te
 func TestSettingService_UpdateSettings_PersistsOpenAIStrictRetrySettings(t *testing.T) {
 	repo := &settingUpdateRepoStub{}
 	svc := NewSettingService(repo, &config.Config{})
-	settings := &SystemSettings{
+
+	err := svc.UpdateSettings(context.Background(), &SystemSettings{
 		OpenAIStrictSchedulerEnabled: true,
 		OpenAIStrictRetryEnabled:     true,
 		OpenAIStrictRetryCount:       5,
 		OpenAIStrictRetryDelayMs:     3000,
-	}
-
-	err := svc.UpdateSettings(context.Background(), settings)
+	})
 	require.NoError(t, err)
 	require.Equal(t, "true", repo.updates[SettingKeyOpenAIStrictSchedulerEnabled])
-	require.Equal(t, "true", repo.updates["openai_strict_retry_enabled"])
-	require.Equal(t, "5", repo.updates["openai_strict_retry_count"])
-	require.Equal(t, "3000", repo.updates["openai_strict_retry_delay_ms"])
+	require.Equal(t, "true", repo.updates[SettingKeyOpenAIStrictRetryEnabled])
+	require.Equal(t, "5", repo.updates[SettingKeyOpenAIStrictRetryCount])
+	require.Equal(t, "3000", repo.updates[SettingKeyOpenAIStrictRetryDelayMs])
+}
+
+func TestSettingService_UpdateSettings_RejectsInvalidPaymentVisibleMethodSource(t *testing.T) {
+	repo := &settingUpdateRepoStub{}
+	svc := NewSettingService(repo, &config.Config{})
+
+	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		PaymentVisibleMethodAlipaySource: "not-a-provider",
+	})
+	require.Error(t, err)
+	require.Equal(t, "INVALID_PAYMENT_VISIBLE_METHOD_SOURCE", infraerrors.Reason(err))
+	require.Nil(t, repo.updates)
 }
