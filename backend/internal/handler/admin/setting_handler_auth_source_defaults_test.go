@@ -16,16 +16,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type settingHandlerRepoStub struct {
+type authSourceDefaultsRepoStub struct {
 	values      map[string]string
 	lastUpdates map[string]string
 }
 
-func (s *settingHandlerRepoStub) Get(ctx context.Context, key string) (*service.Setting, error) {
+func (s *authSourceDefaultsRepoStub) Get(ctx context.Context, key string) (*service.Setting, error) {
 	panic("unexpected Get call")
 }
 
-func (s *settingHandlerRepoStub) GetValue(ctx context.Context, key string) (string, error) {
+func (s *authSourceDefaultsRepoStub) GetValue(ctx context.Context, key string) (string, error) {
 	if s.values != nil {
 		if value, ok := s.values[key]; ok {
 			return value, nil
@@ -34,11 +34,11 @@ func (s *settingHandlerRepoStub) GetValue(ctx context.Context, key string) (stri
 	return "", nil
 }
 
-func (s *settingHandlerRepoStub) Set(ctx context.Context, key, value string) error {
+func (s *authSourceDefaultsRepoStub) Set(ctx context.Context, key, value string) error {
 	panic("unexpected Set call")
 }
 
-func (s *settingHandlerRepoStub) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
+func (s *authSourceDefaultsRepoStub) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
 	out := make(map[string]string, len(keys))
 	for _, key := range keys {
 		if value, ok := s.values[key]; ok {
@@ -48,7 +48,7 @@ func (s *settingHandlerRepoStub) GetMultiple(ctx context.Context, keys []string)
 	return out, nil
 }
 
-func (s *settingHandlerRepoStub) SetMultiple(ctx context.Context, settings map[string]string) error {
+func (s *authSourceDefaultsRepoStub) SetMultiple(ctx context.Context, settings map[string]string) error {
 	s.lastUpdates = make(map[string]string, len(settings))
 	for key, value := range settings {
 		s.lastUpdates[key] = value
@@ -60,7 +60,7 @@ func (s *settingHandlerRepoStub) SetMultiple(ctx context.Context, settings map[s
 	return nil
 }
 
-func (s *settingHandlerRepoStub) GetAll(ctx context.Context) (map[string]string, error) {
+func (s *authSourceDefaultsRepoStub) GetAll(ctx context.Context) (map[string]string, error) {
 	out := make(map[string]string, len(s.values))
 	for key, value := range s.values {
 		out[key] = value
@@ -68,7 +68,7 @@ func (s *settingHandlerRepoStub) GetAll(ctx context.Context) (map[string]string,
 	return out, nil
 }
 
-func (s *settingHandlerRepoStub) Delete(ctx context.Context, key string) error {
+func (s *authSourceDefaultsRepoStub) Delete(ctx context.Context, key string) error {
 	panic("unexpected Delete call")
 }
 
@@ -126,7 +126,7 @@ func (s *failingAuthSourceSettingsRepoStub) Delete(ctx context.Context, key stri
 
 func TestSettingHandler_GetSettings_InjectsAuthSourceDefaults(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	repo := &settingHandlerRepoStub{
+	repo := &authSourceDefaultsRepoStub{
 		values: map[string]string{
 			service.SettingKeyRegistrationEnabled:                 "true",
 			service.SettingKeyPromoCodeEnabled:                    "true",
@@ -161,7 +161,7 @@ func TestSettingHandler_GetSettings_InjectsAuthSourceDefaults(t *testing.T) {
 
 func TestSettingHandler_UpdateSettings_PreservesOmittedAuthSourceDefaults(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	repo := &settingHandlerRepoStub{
+	repo := &authSourceDefaultsRepoStub{
 		values: map[string]string{
 			service.SettingKeyRegistrationEnabled:                    "false",
 			service.SettingKeyPromoCodeEnabled:                       "true",
@@ -208,7 +208,7 @@ func TestSettingHandler_UpdateSettings_PreservesOmittedAuthSourceDefaults(t *tes
 
 func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedScheduler(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	repo := &settingHandlerRepoStub{
+	repo := &authSourceDefaultsRepoStub{
 		values: map[string]string{
 			service.SettingKeyPromoCodeEnabled: "true",
 		},
@@ -254,7 +254,7 @@ func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedS
 
 func TestSettingHandler_UpdateSettings_PreservesLegacyBlankPaymentVisibleMethodSource(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	repo := &settingHandlerRepoStub{
+	repo := &authSourceDefaultsRepoStub{
 		values: map[string]string{
 			service.SettingKeyPromoCodeEnabled:               "true",
 			service.SettingPaymentVisibleMethodAlipayEnabled: "true",
@@ -286,7 +286,7 @@ func TestSettingHandler_UpdateSettings_PreservesLegacyBlankPaymentVisibleMethodS
 
 func TestSettingHandler_UpdateSettings_PersistsExplicitFalseOIDCCompatibilityFlags(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	repo := &settingHandlerRepoStub{
+	repo := &authSourceDefaultsRepoStub{
 		values: map[string]string{
 			service.SettingKeyPromoCodeEnabled:               "true",
 			service.SettingKeyOIDCConnectEnabled:             "true",
@@ -342,7 +342,7 @@ func TestSettingHandler_UpdateSettings_PersistsExplicitFalseOIDCCompatibilityFla
 
 func TestSettingHandler_UpdateSettings_DoesNotSolidifyImplicitOIDCSecurityDefaultsOnLegacyUpgrade(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	repo := &settingHandlerRepoStub{
+	repo := &authSourceDefaultsRepoStub{
 		values: map[string]string{
 			service.SettingKeyPromoCodeEnabled:                "true",
 			service.SettingKeyOIDCConnectEnabled:              "true",
@@ -411,7 +411,7 @@ func TestSettingHandler_UpdateSettings_DoesNotSolidifyImplicitOIDCSecurityDefaul
 
 func TestSettingHandler_UpdateSettings_RejectsInvalidPaymentVisibleMethodSource(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	repo := &settingHandlerRepoStub{
+	repo := &authSourceDefaultsRepoStub{
 		values: map[string]string{
 			service.SettingKeyPromoCodeEnabled: "true",
 		},
