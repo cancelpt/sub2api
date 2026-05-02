@@ -909,7 +909,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 			if maxPriority > minPriority {
 				priorityFactor = 1 - float64(item.account.Priority-minPriority)/float64(maxPriority-minPriority)
 			}
-			loadFactor := 1 - clamp01(float64(item.loadInfo.LoadRate) / 100.0)
+			loadFactor := 1 - clamp01(float64(item.loadInfo.LoadRate)/100.0)
 			queueFactor := 1 - clamp01(float64(item.loadInfo.WaitingCount)/float64(maxWaiting))
 			errorFactor := 1 - clamp01(item.errorRate)
 			ttftFactor := 0.5

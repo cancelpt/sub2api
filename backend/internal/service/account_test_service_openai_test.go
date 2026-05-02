@@ -345,7 +345,7 @@ func TestAccountTestService_OpenAIAPIKeyDefaultBaseURLUsesV1Responses(t *testing
 		},
 	}
 
-	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4")
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
 	require.NoError(t, err)
 	require.Len(t, upstream.requests, 1)
 	require.Equal(t, "https://api.openai.com/v1/responses", upstream.requests[0].URL.String())

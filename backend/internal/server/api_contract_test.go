@@ -947,6 +947,10 @@ func TestAPIContracts(t *testing.T) {
 					"payment_visible_method_alipay_enabled": false,
 					"payment_visible_method_wxpay_enabled": false,
 					"openai_advanced_scheduler_enabled": false,
+					"openai_strict_scheduler_enabled": false,
+					"openai_strict_retry_enabled": false,
+					"openai_strict_retry_count": 3,
+					"openai_strict_retry_delay_ms": 500,
 					"openai_fast_policy_settings": {
 						"rules": [
 							{

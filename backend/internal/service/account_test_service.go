@@ -550,14 +550,14 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		if baseURL == "" {
 			baseURL = "https://api.openai.com"
 		}
-			normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
-			if err != nil {
-				return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid base URL: %s", err.Error()))
-			}
-			apiURL = buildOpenAIResponsesURL(normalizedBaseURL)
-		} else {
-			return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported account type: %s", account.Type))
+		normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
+		if err != nil {
+			return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid base URL: %s", err.Error()))
 		}
+		apiURL = buildOpenAIResponsesURL(normalizedBaseURL)
+	} else {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported account type: %s", account.Type))
+	}
 
 	// Set SSE headers
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
@@ -1246,16 +1246,16 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 
 	for {
 		line, err := reader.ReadString('\n')
-			if err != nil {
-				if err == io.EOF {
-					if seenCompleted {
-						s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
-						return nil
-					}
-					return s.sendErrorAndEnd(c, "Stream ended before response.completed")
+		if err != nil {
+			if err == io.EOF {
+				if seenCompleted {
+					s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+					return nil
 				}
-				return s.sendErrorAndEnd(c, fmt.Sprintf("Stream read error: %s", err.Error()))
+				return s.sendErrorAndEnd(c, "Stream ended before response.completed")
 			}
+			return s.sendErrorAndEnd(c, fmt.Sprintf("Stream read error: %s", err.Error()))
+		}
 
 		line = strings.TrimSpace(line)
 		if line == "" || !sseDataPrefix.MatchString(line) {
@@ -1290,16 +1290,16 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 		case "response.completed", "response.done":
 			s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 			return nil
-			case "response.failed":
-				errorMsg := "OpenAI response failed"
-				if responseData, ok := data["response"].(map[string]any); ok {
-					if errData, ok := responseData["error"].(map[string]any); ok {
-						if msg, ok := errData["message"].(string); ok && msg != "" {
-							errorMsg = msg
-						}
+		case "response.failed":
+			errorMsg := "OpenAI response failed"
+			if responseData, ok := data["response"].(map[string]any); ok {
+				if errData, ok := responseData["error"].(map[string]any); ok {
+					if msg, ok := errData["message"].(string); ok && msg != "" {
+						errorMsg = msg
 					}
 				}
-				return s.sendErrorAndEnd(c, errorMsg)
+			}
+			return s.sendErrorAndEnd(c, errorMsg)
 		case "error":
 			errorMsg := "Unknown error"
 			if errData, ok := data["error"].(map[string]any); ok {
